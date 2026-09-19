@@ -66,10 +66,6 @@ Every module below exists to close a specific, evidence-backed gap identified in
 - Save as draft / publish workflow
 - Inline validation (flags broken mappings before publish, not after failure)
 
-**Suggested stack:**
-- **Primary:** React + React Flow (purpose-built node-graph library, industry standard for this exact use case), Tailwind CSS, Zustand for builder state, MongoDB storing the workflow definition as JSON (nodes + edges)
-- **Alternatives:** Rete.js or Drawflow (lighter-weight node-editor libraries if React Flow feels heavy), tldraw (for a more freeform canvas feel), Redux Toolkit instead of Zustand if the team is more familiar with it
-
 ---
 
 ## 3A. Onboarding & Guided Template Library *(new — closes the #1 identified gap)*
@@ -82,10 +78,6 @@ Every module below exists to close a specific, evidence-backed gap identified in
 - In-app checklist for first-time users ("Connect your first app", "Run your first workflow")
 - Searchable template gallery, tagged by app and by business function (Sales / Billing / Inventory)
 
-**Suggested stack:**
-- **Primary:** Templates stored as static JSON workflow definitions in MongoDB, React wizard UI reusing Module 3's builder components in a locked-down "fill in the blanks" mode
-- **Alternatives:** A lightweight recommendation layer (rule-based, not ML — e.g. "if user selected 'Retail' → show these 5 templates") is enough for v1; no need for a real ML recommender at this scope
-
 ---
 
 ## 4. Trigger & Event Detection Engine
@@ -97,10 +89,6 @@ Every module below exists to close a specific, evidence-backed gap identified in
 - Scheduled polling for apps that don't (configurable interval)
 - Deduplication logic — prevents the same event firing a workflow twice
 - Trigger payload normalization before handoff to the execution engine
-
-**Suggested stack:**
-- **Primary:** Express webhook routes, node-cron or BullMQ repeatable jobs for polling, Redis for a dedup/idempotency cache (store last-seen event IDs with TTL)
-- **Alternatives:** Temporal (if the team wants to study a more robust, enterprise-grade workflow-orchestration engine — heavier than needed for v1 but a strong "future work" mention in the report), AWS EventBridge if going cloud-native instead of self-managed queues
 
 ---
 
@@ -115,10 +103,6 @@ Every module below exists to close a specific, evidence-backed gap identified in
 - Execution status tracking (queued/running/success/failed)
 - Rate-limit awareness per connected app (avoid hitting third-party API caps)
 
-**Suggested stack:**
-- **Primary:** BullMQ + Redis for the task queue (Node-native equivalent of Zapier's Celery/RabbitMQ setup studied in the architecture research), worker processes separate from the API server, MongoDB for execution records
-- **Alternatives:** RabbitMQ directly (closer to what Zapier actually uses, stronger citation match if the report leans on that comparison), AWS SQS + Lambda if going serverless for the worker layer (mirrors Zapier's Lambda isolation pattern from your architecture study)
-
 ---
 
 ## 6. Error Handling, Logging & Retry
@@ -132,10 +116,6 @@ Every module below exists to close a specific, evidence-backed gap identified in
 - Dead-letter handling for workflows that exhaust retries
 - Plain-language error messages for non-technical users (not raw API error codes)
 
-**Suggested stack:**
-- **Primary:** BullMQ's built-in retry/backoff support, MongoDB collection for structured logs (indexed by workflowId + timestamp), Winston or Pino for service-level logging
-- **Alternatives:** Sentry (error tracking/alerting, free tier is generous and demos well), ELK stack (Elasticsearch + Logstash + Kibana) if the report wants to show a more enterprise-grade observability story
-
 ---
 
 ## 7. Monitoring Dashboard & Notifications
@@ -148,10 +128,6 @@ Every module below exists to close a specific, evidence-backed gap identified in
 - Email or in-app notification when a workflow fails repeatedly
 - Basic usage stats (tasks run this month, per workflow)
 
-**Suggested stack:**
-- **Primary:** React dashboard consuming a REST/GraphQL API, Recharts or Chart.js for run-history visualizations, Nodemailer/Resend + a notification-preferences model for alerts
-- **Alternatives:** GraphQL (Apollo Server) instead of REST if the dashboard needs flexible, nested queries; Socket.io for live status updates instead of polling the API on an interval
-
 ---
 
 ## 8. Data Mapping & Transformation Layer
@@ -162,10 +138,6 @@ Every module below exists to close a specific, evidence-backed gap identified in
 - Field-to-field mapping (e.g. CRM `full_name` → Sheet `Name` column)
 - Basic transformations: formatting, concatenation, default values, type coercion
 - Mapping validation before a workflow can be published
-
-**Suggested stack:**
-- **Primary:** A small transformation-function library in Node (pure functions, unit-testable), mapping config stored as part of the workflow JSON in MongoDB, JSON Schema for validating mapped output shape
-- **Alternatives:** JSONata or JMESPath (declarative JSON transformation languages — lets power users write custom mapping expressions later without you building a full expression engine yourself)
 
 ---
 
@@ -178,10 +150,6 @@ Every module below exists to close a specific, evidence-backed gap identified in
 - Usage dashboard showing plan limits clearly (not buried in fine print)
 - Simple upgrade/downgrade flow, no sales call required
 
-**Suggested stack:**
-- **Primary:** Stripe (test mode is fine for an academic demo) with a plan/usage schema in MongoDB
-- **Alternatives:** A fully mocked billing service (plan/usage collections, no real payment gateway) is defensible for a purely academic submission if Stripe integration eats into time better spent on Modules 3-6
-
 ---
 
 ## 10. Deployment Flexibility — Cloud + Self-Host *(new — closes the self-hosting gap)*
@@ -192,10 +160,6 @@ Every module below exists to close a specific, evidence-backed gap identified in
 - Default: multi-tenant cloud SaaS (as with every other module above)
 - Optional: single-command self-hosted deployment for SMEs that want data on their own infrastructure
 - Config-driven environment setup (no manual database/queue setup required)
-
-**Suggested stack:**
-- **Primary:** Docker + Docker Compose bundling the API, worker, MongoDB, and Redis into one `docker-compose up` deployment — this is the actual "doable" version of self-hosting for a non-technical SME, unlike n8n's more DIY setup
-- **Alternatives:** Kubernetes Helm chart (more scalable but overkill and too technical for the target user — worth mentioning as a "future work: enterprise self-host" note rather than building it), Railway/Render one-click deploy templates as a middle ground between full self-host and pure SaaS
 
 ---
 
@@ -208,10 +172,6 @@ Every module below exists to close a specific, evidence-backed gap identified in
 - Pre-built template pairing this with Module 3A (e.g. "New WhatsApp enquiry → create CRM lead")
 - Basic template-message support (WhatsApp Business API requires pre-approved templates for outbound messages — worth noting as a real constraint in the report)
 
-**Suggested stack:**
-- **Primary:** WhatsApp Business Platform API (Meta Cloud API — free tier available, no need for a paid BSP for an academic build), Node.js webhook handler feeding into Module 4
-- **Alternatives:** Twilio's WhatsApp API (easier onboarding than Meta's raw Cloud API, small per-message cost) if Meta's app-review process is too slow for the project timeline
-
 ---
 
 ## 12. Workflow Export & Data Portability *(new — closes the vendor lock-in gap)*
@@ -222,10 +182,6 @@ Every module below exists to close a specific, evidence-backed gap identified in
 - Export any workflow as a portable JSON file (nodes, edges, mappings — credentials excluded for security)
 - Import a previously exported workflow back in (supports backup, and duplication across workspaces)
 - Human-readable workflow documentation auto-generated from the definition (what triggers what, in plain English)
-
-**Suggested stack:**
-- **Primary:** JSON serialization of the existing workflow schema (Module 3 already stores workflows this way — this module is mostly an export/import UI + validation layer on top)
-- **Alternatives:** None needed — this is intentionally lightweight; over-engineering it would be a poor use of project time relative to its role in the report
 
 ---
 
