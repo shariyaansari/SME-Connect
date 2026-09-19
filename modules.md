@@ -31,10 +31,6 @@ Every module below exists to close a specific, evidence-backed gap identified in
 - Team invites via email link
 - Audit trail of who changed what (login, workflow edits, permission changes)
 
-**Suggested stack:**
-- **Primary:** Node.js + Express, MongoDB (User, Organization, Membership collections), JWT (jsonwebtoken), bcrypt/argon2 for password hashing, Resend or Nodemailer for transactional email
-- **Alternatives:** Auth0 or Clerk (managed auth, faster to build but less control/cost at scale), Ory Kratos (open-source, self-hostable identity — fits Module 10's self-host story well), PostgreSQL with row-level security instead of MongoDB if strict relational integrity across orgs is wanted
-
 ---
 
 ## 2. Connector / Integration Management
@@ -47,10 +43,6 @@ Every module below exists to close a specific, evidence-backed gap identified in
 - Standard connector interface (ports-and-adapters pattern) — new apps plug in as adapters without touching the core engine
 - Connection health check / re-auth flow
 - Generic "custom API" connector (like n8n's HTTP Request fallback) so unsupported apps aren't a dead end
-
-**Suggested stack:**
-- **Primary:** Node.js service layer with a common `Connector` interface (`connect()`, `fetchTrigger()`, `executeAction()` per adapter), MongoDB for encrypted credential storage, Passport.js or simple-oauth2 for OAuth flows
-- **Alternatives:** HashiCorp Vault or AWS Secrets Manager for credential storage instead of encrypted MongoDB fields (stronger security story for the report), Nango or Unified.to (open-source unified-API layers built exactly for this — worth citing as a reference architecture even if not adopted directly)
 
 ---
 
