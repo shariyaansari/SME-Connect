@@ -1,7 +1,29 @@
 # SME Connect — Module Breakdown
-
-Modular design for the Unified Workflow Automation Platform. Each module lists purpose, key features, and suggested tech stack (primary pick + alternatives) — aligned to MERN where possible, given existing project background.
-
+```
+SME CONNECT
+                         │
+        ┌────────────────┼────────────────┐
+        │                │                │
+        ▼                ▼                ▼
+   CORE PLATFORM    DIFFERENTIATORS    SUPPORTING
+                                      CAPABILITIES
+        │                │                │
+        │                │                ├── Deployment
+        │                │                └── Billing
+        │                │
+        │                ├── Templates
+        │                ├── WhatsApp
+        │                └── Export/Import
+        │
+        ├── Users / Org
+        ├── Connectors
+        ├── Workflows
+        ├── Triggers
+        ├── Execution
+        ├── Mapping
+        ├── Error Handling
+        └── Monitoring
+```
 ---
 
 ## Market Gap → Module Mapping
