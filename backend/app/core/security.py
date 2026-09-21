@@ -54,6 +54,10 @@ def get_current_user(
     return user
 
 
+def hash_password(plain_password: str) -> str:
+    return password_hash.hash(plain_password)
+
+
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     return password_hash.verify(plain_password, hashed_password)
 
@@ -77,7 +81,9 @@ def create_access_token(user_id: int) -> str:
 
 
 def create_refresh_token(user_id: int) -> str:
-    expires_at = datetime.now(timezone.utc) + timedelta(days=7)
+    expires_at = datetime.now(timezone.utc) + timedelta(
+        days=settings.refresh_token_expire_days
+    )
 
     payload = {
         "sub": str(user_id),
@@ -90,3 +96,58 @@ def create_refresh_token(user_id: int) -> str:
         settings.jwt_secret_key,
         algorithm=settings.jwt_algorithm,
     )
+
+
+def verify_refresh_token(token: str) -> int:
+    try:
+        payload = jwt.decode(
+            token,
+            settings.jwt_secret_key,
+            algorithms=[settings.jwt_algorithm],
+        )
+
+        if payload.get("type") != "refresh":
+            raise ValueError("Token is not a refresh token")
+
+        return int(payload["sub"])
+    except (jwt.InvalidTokenError, KeyError, TypeError, ValueError):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired refresh token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+
+def create_email_verification_token(user_id: int, email: str) -> str:
+    expires_at = datetime.now(timezone.utc) + timedelta(
+        hours=settings.email_verification_expire_hours
+    )
+
+    payload = {
+        "sub": str(user_id),
+        "email": email.lower().strip(),
+        "type": "email_verification",
+        "exp": expires_at,
+    }
+
+    return jwt.encode(
+        payload,
+        settings.jwt_secret_key,
+        algorithm=settings.jwt_algorithm,
+    )
+
+
+def verify_email_verification_token(token: str) -> tuple[int, str]:
+    try:
+        payload = jwt.decode(
+            token,
+            settings.jwt_secret_key,
+            algorithms=[settings.jwt_algorithm],
+        )
+
+        if payload.get("type") != "email_verification":
+            raise ValueError("Invalid token type")
+
+        return int(payload["sub"]), str(payload["email"])
+    except (jwt.InvalidTokenError, KeyError, TypeError, ValueError) as error:
+        raise ValueError("Invalid or expired email verification token") from error

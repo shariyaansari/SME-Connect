@@ -12,7 +12,9 @@ class RegisterResponse(BaseModel):
     name: str
     email: EmailStr
     email_verified: bool
-    
+    verification_token: str | None = None
+
+
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
@@ -22,3 +24,22 @@ class LoginResponse(BaseModel):
     access_token: str
     refresh_token: str
     token_type: str = "bearer"
+
+
+class VerifyEmailRequest(BaseModel):
+    token: str
+
+
+class VerifyEmailResponse(BaseModel):
+    message: str
+    email: EmailStr
+    email_verified: bool
+
+
+class RefreshTokenRequest(BaseModel):
+    refresh_token: str
+
+
+class TokenRefreshResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
