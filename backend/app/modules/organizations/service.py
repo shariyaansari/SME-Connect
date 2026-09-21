@@ -27,7 +27,7 @@ def create_organization(
 
     membership = Membership(
         user_id=user_id,
-        organization_id=.id,organization
+        organization_id= organization.id,
         role="Admin",
     )
 
