@@ -1,21 +1,50 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import Header from './components/Header';
-import QuickStartBanner from './components/QuickStartBanner';
-import ConnectorCatalog from './components/ConnectorCatalog';
+import WorkflowsView from './components/WorkflowsView';
 import ConnectedApps from './components/ConnectedApps';
+import ConnectorCatalog from './components/ConnectorCatalog';
+import TeamWorkspaceView from './components/TeamWorkspaceView';
 import ConnectModal from './components/ConnectModal';
-import { api, ensureSession } from './api';
-import { CheckCircle2, AlertCircle } from 'lucide-react';
+import InviteModal from './components/InviteModal';
+import AuthView from './components/AuthView';
+import { api, checkSession } from './api';
+import { CheckCircle, AlertTriangle, Mail, ArrowRight } from 'lucide-react';
+import './App.css';
 
 export default function App() {
+  const [currentUser, setCurrentUser] = useState(null);
+  const [theme, setTheme] = useState(() => {
+    return localStorage.getItem('sme_theme') || 'light';
+  });
+
   const [catalog, setCatalog] = useState([]);
   const [connections, setConnections] = useState([]);
+  const [organizations, setOrganizations] = useState([]);
   const [currentOrg, setCurrentOrg] = useState(null);
-  const [activeTab, setActiveTab] = useState('catalog');
+  const [members, setMembers] = useState([]);
+  const [pendingInvitations, setPendingInvitations] = useState([]);
+
+  const [activeTab, setActiveTab] = useState('workflows');
   const [selectedConnector, setSelectedConnector] = useState(null);
+  const [editingConnection, setEditingConnection] = useState(null);
+  const [showInviteModal, setShowInviteModal] = useState(false);
   const [loading, setLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [toast, setToast] = useState(null);
+
+  // Apply theme to document element
+  useEffect(() => {
+    if (theme === 'dark') {
+      document.documentElement.setAttribute('data-theme', 'dark');
+    } else {
+      document.documentElement.removeAttribute('data-theme');
+    }
+    localStorage.setItem('sme_theme', theme);
+  }, [theme]);
+
+  const toggleTheme = () => {
+    setTheme((prev) => (prev === 'light' ? 'dark' : 'light'));
+  };
 
   const showToast = (message, type = 'success') => {
     setToast({ message, type });
@@ -24,44 +53,129 @@ export default function App() {
     }, 4000);
   };
 
-  const loadData = async () => {
+  const loadData = useCallback(async (targetOrgId = null) => {
     try {
-      await ensureSession();
-      const [catalogData, connectionsData, orgData] = await Promise.all([
-        api.fetchCatalog(),
-        api.fetchConnections(),
-        api.fetchCurrentOrganization().catch(() => null),
+      const user = await checkSession();
+      if (!user) {
+        setCurrentUser(null);
+        setLoading(false);
+        setIsRefreshing(false);
+        return;
+      }
+      setCurrentUser(user);
+
+      const [orgs, catalogData, pending] = await Promise.all([
+        api.fetchOrganizations().catch(() => []),
+        api.fetchCatalog().catch(() => []),
+        api.fetchPendingInvitations().catch(() => []),
       ]);
+
+      setOrganizations(orgs || []);
       setCatalog(catalogData || []);
-      setConnections(connectionsData || []);
-      setCurrentOrg(orgData);
+      setPendingInvitations(pending || []);
+
+      const orgIdToLoad = targetOrgId || (orgs && orgs.length > 0 ? orgs[0].id : null);
+      let activeOrg = null;
+      let memberList = [];
+      let connectionsList = [];
+
+      if (orgIdToLoad) {
+        const [orgData, membersData, connData] = await Promise.all([
+          api.fetchCurrentOrganization(orgIdToLoad).catch(() => null),
+          api.fetchMembers(orgIdToLoad).catch(() => []),
+          api.fetchConnections(orgIdToLoad).catch(() => []),
+        ]);
+        activeOrg = orgData;
+        memberList = membersData || [];
+        connectionsList = connData || [];
+      } else {
+        const [orgData, membersData, connData] = await Promise.all([
+          api.fetchCurrentOrganization().catch(() => null),
+          api.fetchMembers().catch(() => []),
+          api.fetchConnections().catch(() => []),
+        ]);
+        activeOrg = orgData;
+        memberList = membersData || [];
+        connectionsList = connData || [];
+      }
+
+      setCurrentOrg(activeOrg);
+      setMembers(memberList || []);
+      setConnections(connectionsList || []);
     } catch (err) {
       console.error('Failed to load application data:', err);
     } finally {
       setLoading(false);
       setIsRefreshing(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     loadData();
-  }, []);
+  }, [loadData]);
+
+  const handleAuthSuccess = (user) => {
+    setCurrentUser(user);
+    loadData();
+    showToast(`Signed in as ${user.email}`);
+  };
+
+  const handleLogout = () => {
+    api.logout();
+    setCurrentUser(null);
+    setCurrentOrg(null);
+    setOrganizations([]);
+    setMembers([]);
+    setPendingInvitations([]);
+    showToast('Logged out successfully', 'info');
+  };
 
   const handleRefresh = () => {
     setIsRefreshing(true);
-    loadData();
+    loadData(currentOrg?.id);
+  };
+
+  const handleSelectOrg = async (orgId) => {
+    setIsRefreshing(true);
+    await loadData(orgId);
+  };
+
+  const handleCreateOrg = async (name) => {
+    try {
+      const newOrg = await api.createOrganization(name);
+      showToast(`Created workspace "${newOrg.name}"`);
+      await loadData(newOrg.id);
+    } catch (err) {
+      showToast(err.message || 'Failed to create workspace', 'error');
+    }
   };
 
   const handleCreateConnection = async (payload) => {
-    const newConn = await api.createConnection(payload);
-    setConnections((prev) => [newConn, ...prev]);
-    showToast(`Successfully connected ${newConn.name}!`);
-    setActiveTab('connected');
+    try {
+      const newConn = await api.createConnection(payload, currentOrg?.id);
+      setConnections((prev) => [newConn, ...prev]);
+      showToast(`Connected ${newConn.name}`);
+      setActiveTab('connected');
+    } catch (err) {
+      showToast(err.message || 'Failed to create connection', 'error');
+    }
+  };
+
+  const handleUpdateConnection = async (id, payload) => {
+    try {
+      const updated = await api.updateConnection(id, payload, currentOrg?.id);
+      setConnections((prev) =>
+        prev.map((c) => (c.id === id ? updated : c))
+      );
+      showToast(`Updated connection "${updated.name}"`);
+    } catch (err) {
+      showToast(err.message || 'Failed to update connection', 'error');
+      throw err;
+    }
   };
 
   const handleTestConnection = async (id) => {
-    const result = await api.testConnection(id);
-    // Update status in state
+    const result = await api.testConnection(id, currentOrg?.id);
     setConnections((prev) =>
       prev.map((c) =>
         c.id === id
@@ -79,24 +193,52 @@ export default function App() {
 
   const handleDeleteConnection = async (id) => {
     try {
-      await api.deleteConnection(id);
+      await api.deleteConnection(id, currentOrg?.id);
       setConnections((prev) => prev.filter((c) => c.id !== id));
-      showToast('Connection disconnected and removed.', 'info');
+      showToast('Connection removed');
     } catch (err) {
       showToast(err.message || 'Failed to delete connection', 'error');
     }
   };
 
-  const handleConnectFromBanner = (slug) => {
-    const conn = catalog.find((c) => c.slug === slug);
-    if (conn) {
-      setSelectedConnector(conn);
-    } else {
-      setActiveTab('catalog');
+  const handleInviteMember = async (payload) => {
+    if (currentOrg?.role !== 'Admin') {
+      showToast('Only organization Admins can invite members', 'error');
+      return;
+    }
+    try {
+      const invite = await api.createInvitation(payload, currentOrg?.id);
+      setPendingInvitations((prev) => [invite, ...prev]);
+      showToast(`Invitation sent to ${payload.email}`);
+    } catch (err) {
+      showToast(err.message || 'Failed to send invitation', 'error');
+    }
+  };
+
+  const handleUpdateRole = async (memberId, role) => {
+    try {
+      await api.updateMemberRole(memberId, role, currentOrg?.id);
+      setMembers((prev) =>
+        prev.map((m) => (m.id === memberId ? { ...m, role } : m))
+      );
+      showToast('Member role updated');
+    } catch (err) {
+      showToast(err.message || 'Failed to update role', 'error');
+    }
+  };
+
+  const handleAcceptInvitation = async (token) => {
+    try {
+      const result = await api.acceptInvitation(token);
+      showToast(`Invitation accepted! Added as ${result.role}`);
+      await loadData();
+    } catch (err) {
+      showToast(err.message || 'Failed to accept invitation', 'error');
     }
   };
 
   const connectedSlugs = connections.map((c) => c.connector_slug);
+  const canManageConnectors = currentOrg?.role !== 'Viewer';
 
   if (loading) {
     return (
@@ -106,85 +248,180 @@ export default function App() {
         flexDirection: 'column',
         alignItems: 'center',
         justifyContent: 'center',
-        gap: '1rem',
+        gap: '12px',
+        backgroundColor: 'var(--surface-0)',
       }}>
-        <div className="spinner" style={{ width: '32px', height: '32px', borderWidth: '3px' }} />
-        <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Initializing SME Connect workspace...</p>
+        <div className="spinner" style={{ width: '24px', height: '24px', borderWidth: '2px' }} />
+        <p style={{ color: 'var(--text-secondary)', fontSize: '14px' }}>
+          Loading workspace...
+        </p>
       </div>
     );
   }
 
+  // If user is not logged in: present the entire Module 1 Auth View
+  if (!currentUser) {
+    return <AuthView onAuthSuccess={handleAuthSuccess} />;
+  }
+
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
+    <div className="app-container">
       <Header
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         connectionsCount={connections.length}
+        membersCount={members.length}
         currentOrg={currentOrg}
+        organizations={organizations}
+        onSelectOrg={handleSelectOrg}
+        onCreateOrg={handleCreateOrg}
+        currentUser={currentUser}
+        onLogout={handleLogout}
+        theme={theme}
+        onToggleTheme={toggleTheme}
         onRefresh={handleRefresh}
         isRefreshing={isRefreshing}
       />
 
-      <main style={{
-        flex: 1,
-        maxWidth: '1280px',
-        width: '100%',
-        margin: '0 auto',
-        padding: '2rem',
-      }}>
-        {/* Golden Workflow Banner */}
-        <QuickStartBanner onConnectApp={handleConnectFromBanner} />
+      <main className="main-content">
+        {/* If user has pending invitations, render a calm airy prompt banner */}
+        {pendingInvitations.length > 0 && (
+          <div style={{
+            backgroundColor: 'var(--surface-2)',
+            border: '1px solid var(--border)',
+            borderRadius: '10px',
+            padding: '14px 18px',
+            marginBottom: '20px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '16px',
+            flexWrap: 'wrap',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <Mail size={16} style={{ color: 'var(--status-warning-text)' }} />
+              <div>
+                <span style={{ fontSize: '14px', fontWeight: 500, color: 'var(--text-primary)' }}>
+                  You have a pending organization invitation
+                </span>
+                <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginTop: '1px' }}>
+                  Invited as {pendingInvitations[0].role}. Membership is created upon acceptance.
+                </p>
+              </div>
+            </div>
 
-        {/* Tab Content */}
-        {activeTab === 'catalog' ? (
-          <ConnectorCatalog
-            catalog={catalog}
-            connectedSlugs={connectedSlugs}
-            onSelectConnector={(conn) => setSelectedConnector(conn)}
+            <button
+              className="btn-primary"
+              onClick={() => handleAcceptInvitation(pendingInvitations[0].token)}
+              style={{ fontSize: '13px', padding: '6px 14px' }}
+            >
+              <span>Accept invitation</span>
+              <ArrowRight size={13} />
+            </button>
+          </div>
+        )}
+
+        {activeTab === 'workflows' && (
+          <WorkflowsView
+            onNavigateConnectors={() => setActiveTab('connected')}
           />
-        ) : (
+        )}
+
+        {activeTab === 'connected' && (
           <ConnectedApps
             connections={connections}
             onTestConnection={handleTestConnection}
             onDeleteConnection={handleDeleteConnection}
+            onEditConnection={(conn) => setEditingConnection(conn)}
             onOpenCatalog={() => setActiveTab('catalog')}
+            canManage={canManageConnectors}
+          />
+        )}
+
+        {activeTab === 'catalog' && (
+          <ConnectorCatalog
+            catalog={catalog}
+            connectedSlugs={connectedSlugs}
+            onSelectConnector={(conn) => setSelectedConnector(conn)}
+            canManage={canManageConnectors}
+          />
+        )}
+
+        {activeTab === 'team' && (
+          <TeamWorkspaceView
+            currentOrg={currentOrg}
+            members={members}
+            pendingInvitations={pendingInvitations}
+            onOpenInviteModal={() => {
+              if (currentOrg?.role === 'Admin') {
+                setShowInviteModal(true);
+              } else {
+                showToast('Only workspace Admins can invite new members', 'error');
+              }
+            }}
+            onUpdateRole={handleUpdateRole}
+            onAcceptInvitation={handleAcceptInvitation}
+            currentUser={currentUser}
           />
         )}
       </main>
 
-      {/* Connect Modal */}
-      {selectedConnector && (
+      {/* Connect / Edit Modal (Module 2) */}
+      {(selectedConnector || editingConnection) && (
         <ConnectModal
-          connector={selectedConnector}
-          onClose={() => setSelectedConnector(null)}
-          onSave={handleCreateConnection}
+          connector={
+            selectedConnector ||
+            catalog.find((c) => c.slug === editingConnection?.connector_slug) || {
+              slug: editingConnection?.connector_slug,
+              name: editingConnection?.name,
+              config_fields: [],
+              credential_fields: [],
+            }
+          }
+          initialConnection={editingConnection}
+          onClose={() => {
+            setSelectedConnector(null);
+            setEditingConnection(null);
+          }}
+          onSave={
+            editingConnection
+              ? (payload) => handleUpdateConnection(editingConnection.id, payload)
+              : handleCreateConnection
+          }
         />
       )}
 
-      {/* Toast Notification */}
+      {/* Invite Modal (Module 1) */}
+      {showInviteModal && (
+        <InviteModal
+          onClose={() => setShowInviteModal(false)}
+          onInvite={handleInviteMember}
+        />
+      )}
+
+      {/* Toast Notification (Flat, airy, no shadow) */}
       {toast && (
         <div style={{
           position: 'fixed',
           bottom: '24px',
           right: '24px',
-          padding: '0.8rem 1.2rem',
-          borderRadius: '10px',
-          background: toast.type === 'error' ? 'var(--danger-bg)' : 'var(--bg-elevated)',
-          border: `1px solid ${toast.type === 'error' ? 'var(--danger-border)' : 'var(--border-accent)'}`,
-          color: '#ffffff',
-          fontSize: '0.88rem',
-          fontWeight: 600,
-          boxShadow: 'var(--shadow-lg)',
+          padding: '10px 16px',
+          borderRadius: '8px',
+          backgroundColor: toast.type === 'error' ? 'var(--status-warning-bg)' : 'var(--surface-2)',
+          border: '1px solid var(--border-strong)',
+          color: 'var(--text-primary)',
+          fontSize: '14px',
+          fontWeight: 400,
           display: 'flex',
           alignItems: 'center',
-          gap: '0.6rem',
+          gap: '8px',
+          boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
           zIndex: 200,
-          animation: 'fadeIn 0.2s ease-out',
         }}>
           {toast.type === 'error' ? (
-            <AlertCircle size={18} color="var(--danger)" />
+            <AlertTriangle size={16} style={{ color: 'var(--status-warning-text)' }} />
           ) : (
-            <CheckCircle2 size={18} color="var(--success)" />
+            <CheckCircle size={16} style={{ color: 'var(--status-success-text)' }} />
           )}
           <span>{toast.message}</span>
         </div>

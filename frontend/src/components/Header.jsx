@@ -1,187 +1,356 @@
-import React from 'react';
-import { Layers, CheckCircle, Plus, RefreshCw, Radio } from 'lucide-react';
+import React, { useState } from 'react';
+import {
+  Layers,
+  RefreshCw,
+  Building,
+  Plus,
+  ChevronDown,
+  Sun,
+  Moon,
+  LogOut,
+  User,
+  CheckCircle
+} from 'lucide-react';
 
-export default function Header({ activeTab, setActiveTab, connectionsCount, currentOrg, onRefresh, isRefreshing }) {
+export default function Header({
+  activeTab,
+  setActiveTab,
+  connectionsCount,
+  membersCount,
+  currentOrg,
+  organizations,
+  onSelectOrg,
+  onCreateOrg,
+  currentUser,
+  onLogout,
+  theme,
+  onToggleTheme,
+  onRefresh,
+  isRefreshing
+}) {
+  const [orgDropdownOpen, setOrgDropdownOpen] = useState(false);
+  const [userDropdownOpen, setUserDropdownOpen] = useState(false);
+  const [newOrgName, setNewOrgName] = useState('');
+  const [creatingOrg, setCreatingOrg] = useState(false);
+
+  const handleCreateOrg = async (e) => {
+    e.preventDefault();
+    if (!newOrgName.trim()) return;
+    await onCreateOrg(newOrgName.trim());
+    setNewOrgName('');
+    setCreatingOrg(false);
+    setOrgDropdownOpen(false);
+  };
+
   return (
     <header style={{
+      backgroundColor: 'var(--surface-2)',
       borderBottom: '1px solid var(--border)',
-      background: 'rgba(11, 15, 23, 0.8)',
-      backdropFilter: 'blur(12px)',
       position: 'sticky',
       top: 0,
-      zIndex: 40,
-      padding: '0.85rem 2rem',
+      zIndex: 50,
+      transition: 'background-color 0.2s ease, border-color 0.2s ease',
     }}>
       <div style={{
-        maxWidth: '1280px',
-        margin: '0 auto',
+        width: '100%',
+        padding: '14px 36px',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
-        gap: '1rem',
+        gap: '16px',
+        flexWrap: 'wrap',
       }}>
-        {/* Brand & Workspace */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
-            <div style={{
-              width: '36px',
-              height: '36px',
-              borderRadius: '10px',
-              background: 'linear-gradient(135deg, #6366f1 0%, #a855f7 100%)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              boxShadow: '0 0 16px rgba(99, 102, 241, 0.4)',
-            }}>
-              <Layers size={20} color="#ffffff" />
-            </div>
-            <div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <span style={{ fontWeight: 800, fontSize: '1.15rem', letterSpacing: '-0.02em' }}>SME Connect</span>
-                <span style={{
-                  fontSize: '0.7rem',
-                  fontWeight: 700,
-                  textTransform: 'uppercase',
-                  padding: '0.15rem 0.45rem',
-                  borderRadius: '9999px',
-                  background: 'rgba(99, 102, 241, 0.15)',
-                  color: 'var(--accent-light)',
-                  border: '1px solid rgba(99, 102, 241, 0.3)',
-                }}>v0.1</span>
-              </div>
-              <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Workflow Automation Platform</p>
-            </div>
+
+        {/* Left: Brand and Workspace dropdown */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <Layers size={19} style={{ color: 'var(--primary-btn-bg)' }} />
+            <span style={{ fontSize: '16px', fontWeight: 500, color: 'var(--text-primary)' }}>
+              SME Connect
+            </span>
           </div>
 
-          <div style={{
-            height: '24px',
-            width: '1px',
-            background: 'var(--border)',
-          }} />
+          <div style={{ width: '1px', height: '18px', backgroundColor: 'var(--border)' }} />
 
-          {/* Current Workspace Tag */}
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.5rem',
-            padding: '0.35rem 0.75rem',
-            borderRadius: '8px',
-            background: 'rgba(255, 255, 255, 0.04)',
-            border: '1px solid var(--border)',
-            fontSize: '0.85rem',
-          }}>
-            <div style={{
-              width: '8px',
-              height: '8px',
-              borderRadius: '50%',
-              background: 'var(--success)',
-              boxShadow: '0 0 8px var(--success)',
-            }} />
-            <span style={{ color: 'var(--text-secondary)' }}>Workspace:</span>
-            <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{currentOrg?.name || 'Default Workspace'}</span>
-            <span style={{
-              fontSize: '0.7rem',
-              color: 'var(--accent-light)',
-              background: 'rgba(99, 102, 241, 0.12)',
-              padding: '0.1rem 0.4rem',
-              borderRadius: '4px',
-              fontWeight: 600,
-            }}>{currentOrg?.role || 'Admin'}</span>
+          {/* Workspace dropdown */}
+          <div style={{ position: 'relative' }}>
+            <button
+              onClick={() => setOrgDropdownOpen(!orgDropdownOpen)}
+              className="btn-secondary"
+              style={{
+                fontSize: '13px',
+                padding: '5px 12px',
+                borderRadius: '8px',
+                gap: '8px',
+              }}
+            >
+              <Building size={14} style={{ color: 'var(--text-secondary)' }} />
+              <span>{currentOrg?.name || 'Select workspace'}</span>
+              <span style={{
+                fontSize: '11px',
+                padding: '1px 6px',
+                borderRadius: '9999px',
+                backgroundColor: 'var(--status-neutral-bg)',
+                color: 'var(--status-neutral-text)',
+              }}>
+                {currentOrg?.role || 'Member'}
+              </span>
+              <ChevronDown size={13} style={{ color: 'var(--text-muted)' }} />
+            </button>
+
+            {orgDropdownOpen && (
+              <div style={{
+                position: 'absolute',
+                top: 'calc(100% + 6px)',
+                left: 0,
+                width: '250px',
+                backgroundColor: 'var(--surface-2)',
+                border: '1px solid var(--border)',
+                borderRadius: '10px',
+                padding: '8px',
+                boxShadow: '0 4px 16px rgba(0, 0, 0, 0.06)',
+                zIndex: 60,
+              }}>
+                <div style={{
+                  padding: '6px 8px',
+                  fontSize: '11px',
+                  color: 'var(--text-muted)',
+                  letterSpacing: '0.04em',
+                }} className="kicker-label">
+                  WORKSPACES
+                </div>
+
+                {(organizations || []).map((org) => (
+                  <button
+                    key={org.id}
+                    onClick={() => {
+                      onSelectOrg(org.id);
+                      setOrgDropdownOpen(false);
+                    }}
+                    style={{
+                      width: '100%',
+                      textAlign: 'left',
+                      padding: '8px 10px',
+                      borderRadius: '6px',
+                      border: 'none',
+                      backgroundColor: org.id === currentOrg?.id ? 'var(--surface-hover)' : 'transparent',
+                      color: 'var(--text-primary)',
+                      fontSize: '13px',
+                      fontWeight: 400,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      transition: 'background-color 0.15s ease',
+                    }}
+                  >
+                    <span>{org.name}</span>
+                    <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{org.role}</span>
+                  </button>
+                ))}
+
+                <div style={{ height: '1px', backgroundColor: 'var(--border)', margin: '6px 0' }} />
+
+                {creatingOrg ? (
+                  <form onSubmit={handleCreateOrg} style={{ padding: '4px' }}>
+                    <input
+                      type="text"
+                      className="form-input"
+                      placeholder="New workspace name"
+                      value={newOrgName}
+                      onChange={(e) => setNewOrgName(e.target.value)}
+                      autoFocus
+                      style={{ marginBottom: '8px', fontSize: '13px' }}
+                    />
+                    <div style={{ display: 'flex', gap: '6px' }}>
+                      <button type="submit" className="btn-primary" style={{ padding: '4px 10px', fontSize: '12px', flex: 1 }}>
+                        Create
+                      </button>
+                      <button
+                        type="button"
+                        className="btn-secondary"
+                        style={{ padding: '4px 10px', fontSize: '12px' }}
+                        onClick={() => setCreatingOrg(false)}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </form>
+                ) : (
+                  <button
+                    onClick={() => setCreatingOrg(true)}
+                    style={{
+                      width: '100%',
+                      padding: '7px 10px',
+                      borderRadius: '6px',
+                      border: 'none',
+                      backgroundColor: 'transparent',
+                      color: 'var(--text-secondary)',
+                      fontSize: '13px',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                    }}
+                  >
+                    <Plus size={14} />
+                    <span>Create workspace</span>
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         </div>
 
-        {/* Tab Navigation */}
-        <nav style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', background: 'rgba(255, 255, 255, 0.03)', padding: '0.25rem', borderRadius: '10px', border: '1px solid var(--border)' }}>
-          <button
-            onClick={() => setActiveTab('catalog')}
-            style={{
-              padding: '0.45rem 1rem',
-              borderRadius: '8px',
-              border: 'none',
-              cursor: 'pointer',
-              fontWeight: 600,
-              fontSize: '0.875rem',
-              transition: 'all 0.2s',
-              background: activeTab === 'catalog' ? 'var(--accent)' : 'transparent',
-              color: activeTab === 'catalog' ? '#ffffff' : 'var(--text-secondary)',
-              boxShadow: activeTab === 'catalog' ? '0 2px 8px var(--accent-glow)' : 'none',
-            }}
-          >
-            App Catalog
-          </button>
-
-          <button
-            onClick={() => setActiveTab('connected')}
-            style={{
-              padding: '0.45rem 1rem',
-              borderRadius: '8px',
-              border: 'none',
-              cursor: 'pointer',
-              fontWeight: 600,
-              fontSize: '0.875rem',
-              transition: 'all 0.2s',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.4rem',
-              background: activeTab === 'connected' ? 'var(--accent)' : 'transparent',
-              color: activeTab === 'connected' ? '#ffffff' : 'var(--text-secondary)',
-              boxShadow: activeTab === 'connected' ? '0 2px 8px var(--accent-glow)' : 'none',
-            }}
-          >
-            <span>Connected Apps</span>
-            <span style={{
-              fontSize: '0.72rem',
-              padding: '0.1rem 0.45rem',
-              borderRadius: '9999px',
-              background: activeTab === 'connected' ? 'rgba(255, 255, 255, 0.25)' : 'rgba(255, 255, 255, 0.08)',
-              color: '#ffffff',
-            }}>
-              {connectionsCount}
-            </span>
-          </button>
+        {/* Center: Navigation tabs in sentence case */}
+        <nav style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          {[
+            { id: 'workflows', label: 'Workflows' },
+            { id: 'connected', label: 'Connected apps', count: connectionsCount },
+            { id: 'catalog', label: 'App catalog' },
+            { id: 'team', label: 'Team & workspace', count: membersCount },
+          ].map((tab) => {
+            const isActive = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                style={{
+                  padding: '7px 14px',
+                  borderRadius: '8px',
+                  border: 'none',
+                  backgroundColor: isActive ? 'var(--surface-hover)' : 'transparent',
+                  color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)',
+                  fontSize: '14px',
+                  fontWeight: isActive ? 500 : 400,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '7px',
+                  transition: 'background-color 0.15s ease',
+                }}
+              >
+                <span>{tab.label}</span>
+                {typeof tab.count === 'number' && (
+                  <span style={{
+                    fontSize: '11px',
+                    padding: '1px 6px',
+                    borderRadius: '9999px',
+                    backgroundColor: isActive ? 'var(--status-neutral-bg)' : 'transparent',
+                    color: isActive ? 'var(--text-primary)' : 'var(--text-muted)',
+                  }}>
+                    {tab.count}
+                  </span>
+                )}
+              </button>
+            );
+          })}
         </nav>
 
-        {/* Action Controls */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+        {/* Right: Theme Toggle + User Dropdown + Refresh */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          {/* Theme mode toggle */}
           <button
-            onClick={onRefresh}
-            title="Refresh Data"
-            style={{
-              background: 'rgba(255, 255, 255, 0.05)',
-              border: '1px solid var(--border)',
-              color: 'var(--text-secondary)',
-              borderRadius: '8px',
-              padding: '0.5rem',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              transition: 'all 0.2s',
-            }}
+            onClick={onToggleTheme}
+            className="btn-secondary"
+            title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+            style={{ padding: '7px' }}
           >
-            <RefreshCw size={16} className={isRefreshing ? 'spinner' : ''} />
+            {theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
           </button>
 
           <button
-            onClick={() => setActiveTab('catalog')}
-            style={{
-              background: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
-              border: 'none',
-              color: '#ffffff',
-              padding: '0.5rem 0.95rem',
-              borderRadius: '8px',
-              fontWeight: 600,
-              fontSize: '0.85rem',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.35rem',
-              boxShadow: '0 2px 10px var(--accent-glow)',
-            }}
+            onClick={onRefresh}
+            className="btn-secondary"
+            title="Refresh data"
+            style={{ padding: '7px' }}
           >
-            <Plus size={16} />
-            <span>Connect App</span>
+            <RefreshCw size={14} className={isRefreshing ? 'spinner' : ''} />
           </button>
+
+          {/* User profile dropdown & logout */}
+          {currentUser && (
+            <div style={{ position: 'relative' }}>
+              <button
+                onClick={() => setUserDropdownOpen(!userDropdownOpen)}
+                className="btn-secondary"
+                style={{
+                  padding: '5px 10px',
+                  borderRadius: '8px',
+                  fontSize: '13px',
+                  gap: '6px',
+                }}
+              >
+                <User size={14} style={{ color: 'var(--text-secondary)' }} />
+                <span>{currentUser.name || currentUser.email}</span>
+                {currentUser.email_verified && (
+                  <CheckCircle size={12} style={{ color: 'var(--status-success-text)' }} />
+                )}
+                <ChevronDown size={12} style={{ color: 'var(--text-muted)' }} />
+              </button>
+
+              {userDropdownOpen && (
+                <div style={{
+                  position: 'absolute',
+                  top: 'calc(100% + 6px)',
+                  right: 0,
+                  width: '220px',
+                  backgroundColor: 'var(--surface-2)',
+                  border: '1px solid var(--border)',
+                  borderRadius: '10px',
+                  padding: '10px',
+                  boxShadow: '0 4px 16px rgba(0, 0, 0, 0.06)',
+                  zIndex: 60,
+                }}>
+                  <div style={{ padding: '4px 6px', marginBottom: '6px' }}>
+                    <div style={{ fontSize: '13px', fontWeight: 500, color: 'var(--text-primary)' }}>
+                      {currentUser.name}
+                    </div>
+                    <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                      {currentUser.email}
+                    </div>
+                    <div style={{ marginTop: '4px' }}>
+                      <span className={`status-pill ${currentUser.email_verified ? 'success' : 'neutral'}`} style={{ fontSize: '11px', padding: '1px 6px' }}>
+                        {currentUser.email_verified ? 'Verified email' : 'Unverified'}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div style={{ height: '1px', backgroundColor: 'var(--border)', margin: '6px 0' }} />
+
+                  <button
+                    onClick={() => {
+                      setUserDropdownOpen(false);
+                      onLogout();
+                    }}
+                    style={{
+                      width: '100%',
+                      padding: '7px 10px',
+                      borderRadius: '6px',
+                      border: 'none',
+                      backgroundColor: 'transparent',
+                      color: 'var(--text-secondary)',
+                      fontSize: '13px',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      transition: 'background-color 0.15s ease',
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.backgroundColor = 'var(--surface-hover)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.backgroundColor = 'transparent';
+                    }}
+                  >
+                    <LogOut size={14} />
+                    <span>Log out</span>
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </header>

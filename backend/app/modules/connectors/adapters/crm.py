@@ -99,3 +99,57 @@ class CRMAdapter(BaseConnectorAdapter):
             return False, f"Failed to authenticate with {provider}: Invalid token"
 
         return True, f"Successfully authenticated with {provider}"
+
+    def read_trigger_data(
+        self,
+        trigger_slug: str,
+        config: dict[str, Any],
+        credentials: dict[str, Any],
+        cursor: Any | None = None,
+    ) -> tuple[list[dict[str, Any]], Any | None]:
+        from datetime import datetime, timezone
+        if trigger_slug == "new_lead":
+            next_id = f"lead_{int(datetime.now(timezone.utc).timestamp())}"
+            lead = {
+                "lead_id": next_id,
+                "name": "Jane Smith",
+                "email": "jane@enterprise.com",
+                "phone": "+1-555-0199",
+                "status": "new",
+            }
+            return [lead], next_id
+        return [], cursor
+
+    def execute_action(
+        self,
+        action_slug: str,
+        input_data: dict[str, Any],
+        config: dict[str, Any],
+        credentials: dict[str, Any],
+    ) -> dict[str, Any]:
+        provider = config.get("crm_provider", "HubSpot")
+        if action_slug == "create_lead":
+            from datetime import datetime, timezone
+            lead_id = f"crm_lead_{int(datetime.now(timezone.utc).timestamp())}"
+            return {
+                "success": True,
+                "action": "create_lead",
+                "provider": provider,
+                "lead_id": lead_id,
+                "created_contact": {
+                    "name": input_data.get("name") or input_data.get("Name"),
+                    "email": input_data.get("email") or input_data.get("Email"),
+                    "phone": input_data.get("phone") or input_data.get("Phone"),
+                },
+                "status": "created",
+            }
+        elif action_slug == "update_lead":
+            return {
+                "success": True,
+                "action": "update_lead",
+                "provider": provider,
+                "status": "updated",
+                "updated_fields": input_data,
+            }
+        return {"success": True, "action": action_slug, "data": input_data}
+

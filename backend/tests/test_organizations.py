@@ -79,33 +79,54 @@ def test_invite_member_flow(client):
     assert dup_invite.status_code == 400
     assert "already pending" in dup_invite.json()["detail"].lower()
 
-    # 3. Employee registers and sees pending invite
+    # 3. Employee registers and logs in
     emp_headers = register_and_login(client, "Employee One", "employee@company.com")
+
+    # Registration does not automatically create organization membership
+    orgs_resp = client.get("/organizations", headers=emp_headers)
+    assert orgs_resp.status_code == 200
+    assert orgs_resp.json() == []
+    me_resp = client.get("/organizations/me", headers=emp_headers)
+    assert me_resp.status_code == 404
+
+    # 4. View pending invitation
     pending_resp = client.get("/organizations/invitations/pending", headers=emp_headers)
     assert pending_resp.status_code == 200
     pending_list = pending_resp.json()
     assert len(pending_list) == 1
     assert pending_list[0]["email"] == "employee@company.com"
+    assert pending_list[0]["status"] == "pending"
+    assert pending_list[0]["token"] == token
 
-    # 4. Another user cannot accept someone else's invite
+    # 5. Another user cannot accept someone else's invite
     other_headers = register_and_login(client, "Intruder", "intruder@company.com")
     intruder_accept = client.post(
         "/organizations/invitations/accept",
-        json={"token": token},
+        json={"token": pending_list[0]["token"]},
         headers=other_headers,
     )
     assert intruder_accept.status_code == 403
 
-    # 5. Employee accepts invitation
+    # 6. Employee accepts invitation
     accept_resp = client.post(
         "/organizations/invitations/accept",
-        json={"token": token},
+        json={"token": pending_list[0]["token"]},
         headers=emp_headers,
     )
     assert accept_resp.status_code == 200
     assert accept_resp.json()["role"] == "Editor"
 
-    # 6. Verify employee is now in members list
+    # Membership is now created
+    my_orgs = client.get("/organizations", headers=emp_headers).json()
+    assert len(my_orgs) == 1
+    assert my_orgs[0]["name"] == "Company X"
+    assert my_orgs[0]["role"] == "Editor"
+
+    # Pending invitations is now empty (invitation is accepted)
+    pending_after = client.get("/organizations/invitations/pending", headers=emp_headers).json()
+    assert pending_after == []
+
+    # 7. Verify employee is now in members list
     members_resp = client.get("/organizations/members", headers=admin_headers)
     assert len(members_resp.json()) == 2
 

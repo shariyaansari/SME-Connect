@@ -53,6 +53,8 @@ class PendingInvitationResponse(BaseModel):
     email: EmailStr
     role: str
     status: str
+    token: str
+
 
 
 class InvitationAcceptRequest(BaseModel):

@@ -3,6 +3,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.security import decrypt_credentials, encrypt_credentials
 from app.database.models import Connection, Membership
 from app.modules.connectors.registry import get_adapter, is_valid_connector
 from app.modules.connectors.schemas import (
@@ -43,6 +44,7 @@ def _get_membership(
 
 
 def _to_response(conn: Connection) -> ConnectionResponse:
+    decrypted_creds = decrypt_credentials(conn.credentials)
     return ConnectionResponse(
         id=conn.id,
         organization_id=conn.organization_id,
@@ -50,7 +52,7 @@ def _to_response(conn: Connection) -> ConnectionResponse:
         name=conn.name,
         auth_type=conn.auth_type,
         config=conn.config or {},
-        masked_credentials=mask_credentials(conn.credentials),
+        masked_credentials=mask_credentials(decrypted_creds),
         status=conn.status,
         last_tested_at=conn.last_tested_at,
         error_message=conn.error_message,
@@ -123,7 +125,7 @@ def create_connection(
         name=data.name.strip(),
         auth_type=data.auth_type,
         config=data.config,
-        credentials=data.credentials,
+        credentials=encrypt_credentials(data.credentials),
         status=status,
         last_tested_at=now,
         error_message=error_msg,
@@ -161,7 +163,8 @@ def test_connection_by_id(
         raise ValueError(f"No adapter available for {connection.connector_slug}")
 
     now = datetime.now(timezone.utc)
-    success, message = adapter.test_connection(connection.config, connection.credentials)
+    decrypted = decrypt_credentials(connection.credentials)
+    success, message = adapter.test_connection(connection.config, decrypted)
 
     connection.status = "active" if success else "error"
     connection.last_tested_at = now
@@ -207,15 +210,16 @@ def update_connection(
         connection.config = new_config
 
     if data.credentials is not None:
-        new_creds = dict(connection.credentials or {})
-        new_creds.update(data.credentials)
-        connection.credentials = new_creds
+        existing_creds = decrypt_credentials(connection.credentials)
+        existing_creds.update(data.credentials)
+        connection.credentials = encrypt_credentials(existing_creds)
 
     # Re-test connection
     adapter = get_adapter(connection.connector_slug)
     if adapter:
         now = datetime.now(timezone.utc)
-        success, message = adapter.test_connection(connection.config, connection.credentials)
+        decrypted = decrypt_credentials(connection.credentials)
+        success, message = adapter.test_connection(connection.config, decrypted)
         connection.status = "active" if success else "error"
         connection.last_tested_at = now
         connection.error_message = None if success else message

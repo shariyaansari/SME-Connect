@@ -1,5 +1,6 @@
-from typing import Any
+from app.modules.connectors.adapters.accounting import ZohoBooksAdapter
 from app.modules.connectors.adapters.base import BaseConnectorAdapter
+from app.modules.connectors.adapters.billing import StripeBillingAdapter
 from app.modules.connectors.adapters.crm import CRMAdapter
 from app.modules.connectors.adapters.custom_api import CustomAPIAdapter
 from app.modules.connectors.adapters.google_sheets import GoogleSheetsAdapter
@@ -8,6 +9,8 @@ from app.modules.connectors.adapters.whatsapp import WhatsAppAdapter
 ADAPTERS: dict[str, BaseConnectorAdapter] = {
     GoogleSheetsAdapter.slug: GoogleSheetsAdapter(),
     CRMAdapter.slug: CRMAdapter(),
+    StripeBillingAdapter.slug: StripeBillingAdapter(),
+    ZohoBooksAdapter.slug: ZohoBooksAdapter(),
     CustomAPIAdapter.slug: CustomAPIAdapter(),
     WhatsAppAdapter.slug: WhatsAppAdapter(),
 }

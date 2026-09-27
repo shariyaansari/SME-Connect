@@ -91,8 +91,62 @@ class GoogleSheetsAdapter(BaseConnectorAdapter):
         if not client_secret:
             return False, "API Key or Private Key is required"
 
-        # Simulating or performing verification
         if "invalid" in client_secret.lower() or "error" in client_secret.lower():
             return False, "Invalid Google Cloud credentials or permissions"
 
         return True, f"Successfully verified access to Google Sheet '{spreadsheet_id}'"
+
+    def read_trigger_data(
+        self,
+        trigger_slug: str,
+        config: dict[str, Any],
+        credentials: dict[str, Any],
+        cursor: Any | None = None,
+    ) -> tuple[list[dict[str, Any]], Any | None]:
+        from datetime import datetime, timezone
+        if trigger_slug == "new_row":
+            if isinstance(cursor, dict):
+                current_row = cursor.get("last_row_index", 1)
+            elif isinstance(cursor, int):
+                current_row = cursor
+            else:
+                current_row = 1
+            next_row = current_row + 1
+            record = {
+                "row_index": next_row,
+                "values": {
+                    "Name": "Rahul Verma",
+                    "Phone": "9876543210",
+                    "Email": "rahul@gmail.com",
+                    "Notes": "Customer inquiry regarding workflow automation",
+                },
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }
+            new_cursor = {"last_row_index": next_row} if isinstance(cursor, dict) else next_row
+            return [record], new_cursor
+        return [], cursor
+
+    def execute_action(
+        self,
+        action_slug: str,
+        input_data: dict[str, Any],
+        config: dict[str, Any],
+        credentials: dict[str, Any],
+    ) -> dict[str, Any]:
+        sheet_id = config.get("spreadsheet_id", "sheet_default")
+        if action_slug == "append_row":
+            return {
+                "success": True,
+                "action": "append_row",
+                "spreadsheet_id": sheet_id,
+                "appended_values": input_data.get("values", input_data),
+                "updated_range": f"{config.get('sheet_name', 'Sheet1')}!A2:D2",
+            }
+        elif action_slug == "read_rows":
+            return {
+                "success": True,
+                "action": "read_rows",
+                "rows": [input_data],
+            }
+        return {"success": True, "action": action_slug, "data": input_data}
+

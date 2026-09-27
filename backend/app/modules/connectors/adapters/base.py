@@ -36,3 +36,32 @@ class BaseConnectorAdapter(ABC):
             (True, "Connection successful") or (False, "Failure explanation")
         """
         raise NotImplementedError
+
+    def read_trigger_data(
+        self,
+        trigger_slug: str,
+        config: dict[str, Any],
+        credentials: dict[str, Any],
+        cursor: Any | None = None,
+    ) -> tuple[list[dict[str, Any]], Any | None]:
+        """
+        Poll or fetch events for a trigger.
+        Returns:
+            (records, new_cursor)
+        """
+        return [], cursor
+
+    def execute_action(
+        self,
+        action_slug: str,
+        input_data: dict[str, Any],
+        config: dict[str, Any],
+        credentials: dict[str, Any],
+    ) -> dict[str, Any]:
+        """
+        Execute an action with input data.
+        Returns:
+            Result dict with execution outcome/response payload.
+        """
+        return {"status": "success", "action": action_slug, "data": input_data}
+

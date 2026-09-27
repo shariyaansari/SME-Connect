@@ -150,4 +150,39 @@ def verify_email_verification_token(token: str) -> tuple[int, str]:
 
         return int(payload["sub"]), str(payload["email"])
     except (jwt.InvalidTokenError, KeyError, TypeError, ValueError) as error:
-        raise ValueError("Invalid or expired email verification token") from error
+        raise ValueError("Invalid or expired email verification token") from error
+
+
+def _get_fernet():
+    import base64
+    import hashlib
+    from cryptography.fernet import Fernet
+
+    key_bytes = hashlib.sha256(settings.jwt_secret_key.encode("utf-8")).digest()
+    fernet_key = base64.urlsafe_b64encode(key_bytes)
+    return Fernet(fernet_key)
+
+
+def encrypt_credentials(creds: dict) -> dict:
+    if not creds:
+        return {}
+    import json
+    raw_json = json.dumps(creds)
+    f = _get_fernet()
+    encrypted_bytes = f.encrypt(raw_json.encode("utf-8"))
+    return {"_encrypted": encrypted_bytes.decode("utf-8")}
+
+
+def decrypt_credentials(stored: dict | None) -> dict:
+    if not stored:
+        return {}
+    if "_encrypted" not in stored:
+        return dict(stored)
+    import json
+    try:
+        f = _get_fernet()
+        decrypted_bytes = f.decrypt(stored["_encrypted"].encode("utf-8"))
+        return json.loads(decrypted_bytes.decode("utf-8"))
+    except Exception:
+        return {}
+

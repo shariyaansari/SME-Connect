@@ -4,6 +4,8 @@ from sqlalchemy.orm import Session
 from app.core.security import get_current_user
 from app.database.connection import get_db
 from app.database.models import User
+from app.modules.audit.schemas import AuditLogResponse
+from app.modules.audit.service import list_organization_audit_logs
 from app.modules.organizations.schemas import (
     CurrentOrganizationResponse,
     InvitationAcceptRequest,
@@ -234,4 +236,27 @@ def update_member_role_endpoint(
         message="Member role updated successfully",
         member_id=member_id,
         role=membership.role,
-    )
+    )
+
+
+@router.get(
+    "/audit-logs",
+    response_model=list[AuditLogResponse],
+)
+def get_audit_logs(
+    organization_id: int | None = Query(None, description="Optional organization ID"),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    try:
+        return list_organization_audit_logs(
+            db=db,
+            user_id=current_user.id,
+            organization_id=organization_id,
+        )
+    except PermissionError as error:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(error),
+        )
+

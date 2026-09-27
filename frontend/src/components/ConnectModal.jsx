@@ -1,13 +1,46 @@
-import React, { useState } from 'react';
-import { X, ShieldCheck, Zap, AlertCircle, FileSpreadsheet, Users, Globe, MessageCircle } from 'lucide-react';
+import {
+  X,
+  Shield,
+  FileSpreadsheet,
+  Users,
+  Globe,
+  MessageSquare,
+  Zap,
+  CreditCard,
+  BookOpen,
+  AlertTriangle
+} from 'lucide-react';
 
-export default function ConnectModal({ connector, onClose, onSave }) {
-  const [name, setName] = useState(`My ${connector.name}`);
+function renderConnectorIcon(slug, size = 18) {
+  switch (slug) {
+    case 'google_sheets':
+      return <FileSpreadsheet size={size} style={{ color: 'var(--text-secondary)' }} />;
+    case 'crm':
+      return <Users size={size} style={{ color: 'var(--text-secondary)' }} />;
+    case 'stripe':
+      return <CreditCard size={size} style={{ color: 'var(--text-secondary)' }} />;
+    case 'zoho_books':
+      return <BookOpen size={size} style={{ color: 'var(--text-secondary)' }} />;
+    case 'custom_api':
+      return <Globe size={size} style={{ color: 'var(--text-secondary)' }} />;
+    case 'whatsapp':
+      return <MessageSquare size={size} style={{ color: 'var(--text-secondary)' }} />;
+    default:
+      return <Zap size={size} style={{ color: 'var(--text-secondary)' }} />;
+  }
+}
+
+export default function ConnectModal({ connector, initialConnection, onClose, onSave }) {
+  const isEdit = Boolean(initialConnection);
+  const [name, setName] = useState(initialConnection?.name || `My ${connector.name}`);
   const [config, setConfig] = useState(() => {
     const initial = {};
     (connector.config_fields || []).forEach((field) => {
       initial[field.key] = field.options ? field.options[0] : '';
     });
+    if (initialConnection?.config) {
+      Object.assign(initial, initialConnection.config);
+    }
     return initial;
   });
   const [credentials, setCredentials] = useState(() => {
@@ -20,34 +53,27 @@ export default function ConnectModal({ connector, onClose, onSave }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  const getIcon = (iconName) => {
-    switch (iconName) {
-      case 'table':
-        return <FileSpreadsheet size={22} color="#10b981" />;
-      case 'users':
-        return <Users size={22} color="#f59e0b" />;
-      case 'globe':
-        return <Globe size={22} color="#38bdf8" />;
-      case 'message-circle':
-        return <MessageCircle size={22} color="#22c55e" />;
-      default:
-        return <Zap size={22} color="var(--accent-light)" />;
-    }
-  };
-
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
     setError(null);
 
     try {
-      await onSave({
-        connector_slug: connector.slug,
+      const payload = {
         name: name.trim(),
         auth_type: connector.auth_type || 'api_key',
         config,
-        credentials,
-      });
+      };
+      // Only include credentials if any were entered
+      const hasCreds = Object.values(credentials).some((val) => val && val.trim() !== '');
+      if (hasCreds || !isEdit) {
+        payload.credentials = credentials;
+      }
+      if (!isEdit) {
+        payload.connector_slug = connector.slug;
+      }
+
+      await onSave(payload);
       onClose();
     } catch (err) {
       setError(err.message || 'Failed to establish connection');
@@ -56,7 +82,6 @@ export default function ConnectModal({ connector, onClose, onSave }) {
     }
   };
 
-  // Pre-fill demo data helper
   const handlePrefillDemo = () => {
     if (connector.slug === 'google_sheets') {
       setConfig({
@@ -101,152 +126,91 @@ export default function ConnectModal({ connector, onClose, onSave }) {
       left: 0,
       right: 0,
       bottom: 0,
-      backgroundColor: 'rgba(5, 8, 15, 0.82)',
-      backdropFilter: 'blur(8px)',
+      backgroundColor: 'rgba(0, 0, 0, 0.7)',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
       zIndex: 100,
-      padding: '1rem',
+      padding: '16px',
     }}>
-      <div
-        className="glass-panel animate-fade-in"
-        style={{
-          width: '100%',
-          maxWidth: '540px',
-          background: '#131b2c',
-          border: '1px solid rgba(255, 255, 255, 0.12)',
-          borderRadius: 'var(--radius-lg)',
-          overflow: 'hidden',
-          boxShadow: 'var(--shadow-lg)',
-        }}
-      >
+      <div style={{
+        backgroundColor: 'var(--surface-2)',
+        border: '1px solid var(--border)',
+        borderRadius: '10px',
+        maxWidth: '480px',
+        width: '100%',
+        maxHeight: '90vh',
+        overflowY: 'auto',
+      }}>
         {/* Modal Header */}
         <div style={{
-          padding: '1.25rem 1.5rem',
+          padding: '16px 20px',
           borderBottom: '1px solid var(--border)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
         }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-            <div style={{
-              width: '40px',
-              height: '40px',
-              borderRadius: '10px',
-              background: 'rgba(255, 255, 255, 0.05)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}>
-              {getIcon(connector.icon)}
-            </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            {renderConnectorIcon(connector.slug, 18)}
             <div>
-              <h3 style={{ fontSize: '1.1rem', color: '#ffffff' }}>Connect {connector.name}</h3>
-              <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>Configure credentials & permissions</p>
+              <h3>{isEdit ? `Update ${connector.name}` : `Connect ${connector.name}`}</h3>
+
+              <p style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                {isEdit ? 'Update credentials or settings & re-verify health' : 'Configure credentials and organization scope'}
+              </p>
             </div>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <button
-              type="button"
-              onClick={handlePrefillDemo}
-              style={{
-                background: 'rgba(99, 102, 241, 0.15)',
-                border: '1px solid rgba(99, 102, 241, 0.3)',
-                color: 'var(--accent-light)',
-                borderRadius: '6px',
-                padding: '0.25rem 0.6rem',
-                fontSize: '0.72rem',
-                fontWeight: 600,
-                cursor: 'pointer',
-              }}
-            >
-              Fill Sample Data
-            </button>
-
-            <button
-              onClick={onClose}
-              style={{
-                background: 'transparent',
-                border: 'none',
-                color: 'var(--text-muted)',
-                cursor: 'pointer',
-                padding: '0.35rem',
-                borderRadius: '6px',
-                display: 'flex',
-              }}
-            >
-              <X size={18} />
-            </button>
-          </div>
+          <button
+            onClick={onClose}
+            className="btn-secondary"
+            style={{ padding: '4px', border: 'none' }}
+          >
+            <X size={16} />
+          </button>
         </div>
 
-        {/* Modal Form Body */}
-        <form onSubmit={handleSubmit} style={{ padding: '1.5rem' }}>
+        {/* Modal Body Form */}
+        <form onSubmit={handleSubmit} style={{ padding: '20px' }}>
           {error && (
             <div style={{
-              padding: '0.75rem',
-              borderRadius: '8px',
-              background: 'var(--danger-bg)',
-              border: '1px solid var(--danger-border)',
-              color: 'var(--danger)',
-              fontSize: '0.85rem',
-              marginBottom: '1.25rem',
+              padding: '8px 12px',
+              borderRadius: '6px',
+              backgroundColor: 'var(--status-warning-bg)',
+              color: 'var(--status-warning-text)',
+              fontSize: '12px',
+              marginBottom: '16px',
               display: 'flex',
               alignItems: 'center',
-              gap: '0.5rem',
+              gap: '6px',
             }}>
-              <AlertCircle size={16} style={{ flexShrink: 0 }} />
+              <AlertTriangle size={14} style={{ flexShrink: 0 }} />
               <span>{error}</span>
             </div>
           )}
 
-          {/* Connection Display Name */}
-          <div style={{ marginBottom: '1.25rem' }}>
-            <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.35rem' }}>
-              Connection Name
-            </label>
+          {/* Connection Name */}
+          <div style={{ marginBottom: '14px' }}>
+            <label className="form-label">Connection name</label>
             <input
               type="text"
               required
+              className="form-input"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. Sales Team Leads Sheet"
-              style={{
-                width: '100%',
-                padding: '0.55rem 0.75rem',
-                borderRadius: '8px',
-                border: '1px solid var(--border)',
-                background: 'rgba(0, 0, 0, 0.25)',
-                color: '#ffffff',
-                fontSize: '0.88rem',
-                outline: 'none',
-              }}
+              placeholder="e.g. Sales inquiries spreadsheet"
             />
           </div>
 
-          {/* Config Fields */}
+          {/* Config fields */}
           {(connector.config_fields || []).map((field) => (
-            <div key={field.key} style={{ marginBottom: '1.15rem' }}>
-              <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.35rem' }}>
-                {field.label} {field.required && <span style={{ color: 'var(--accent)' }}>*</span>}
-              </label>
-
+            <div key={field.key} style={{ marginBottom: '14px' }}>
+              <label className="form-label">{field.label}</label>
               {field.type === 'select' ? (
                 <select
+                  className="form-select"
                   value={config[field.key] || ''}
                   onChange={(e) => setConfig({ ...config, [field.key]: e.target.value })}
-                  style={{
-                    width: '100%',
-                    padding: '0.55rem 0.75rem',
-                    borderRadius: '8px',
-                    border: '1px solid var(--border)',
-                    background: '#1a2438',
-                    color: '#ffffff',
-                    fontSize: '0.88rem',
-                    outline: 'none',
-                  }}
                 >
                   {(field.options || []).map((opt) => (
                     <option key={opt} value={opt}>
@@ -258,88 +222,60 @@ export default function ConnectModal({ connector, onClose, onSave }) {
                 <input
                   type={field.type === 'password' ? 'password' : 'text'}
                   required={field.required}
+                  className="form-input"
                   value={config[field.key] || ''}
                   onChange={(e) => setConfig({ ...config, [field.key]: e.target.value })}
                   placeholder={field.placeholder || ''}
-                  style={{
-                    width: '100%',
-                    padding: '0.55rem 0.75rem',
-                    borderRadius: '8px',
-                    border: '1px solid var(--border)',
-                    background: 'rgba(0, 0, 0, 0.25)',
-                    color: '#ffffff',
-                    fontSize: '0.88rem',
-                    outline: 'none',
-                  }}
                 />
-              )}
-
-              {field.help_text && (
-                <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
-                  {field.help_text}
-                </p>
               )}
             </div>
           ))}
 
-          {/* Credential Fields */}
+          {/* Credential fields */}
           {(connector.credential_fields || []).map((field) => (
-            <div key={field.key} style={{ marginBottom: '1.15rem' }}>
-              <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.35rem' }}>
-                {field.label} {field.required && <span style={{ color: 'var(--accent)' }}>*</span>}
-              </label>
+            <div key={field.key} style={{ marginBottom: '14px' }}>
+              <label className="form-label">{field.label}</label>
               <input
                 type={field.type === 'password' ? 'password' : 'text'}
                 required={field.required}
+                className="form-input"
                 value={credentials[field.key] || ''}
                 onChange={(e) => setCredentials({ ...credentials, [field.key]: e.target.value })}
                 placeholder={field.placeholder || ''}
-                style={{
-                  width: '100%',
-                  padding: '0.55rem 0.75rem',
-                  borderRadius: '8px',
-                  border: '1px solid var(--border)',
-                  background: 'rgba(0, 0, 0, 0.25)',
-                  color: '#ffffff',
-                  fontSize: '0.88rem',
-                  outline: 'none',
-                }}
               />
             </div>
           ))}
 
-          {/* Security Note */}
+          {/* Helper prefill button & security statement */}
           <div style={{
             display: 'flex',
             alignItems: 'center',
-            gap: '0.45rem',
-            padding: '0.65rem 0.85rem',
-            borderRadius: '8px',
-            background: 'rgba(16, 185, 129, 0.08)',
-            border: '1px solid rgba(16, 185, 129, 0.2)',
-            color: 'var(--success)',
-            fontSize: '0.75rem',
-            marginBottom: '1.5rem',
+            justifyContent: 'space-between',
+            marginTop: '8px',
+            marginBottom: '20px',
+            fontSize: '12px',
           }}>
-            <ShieldCheck size={16} />
-            <span>Credentials are strictly encrypted and scoped to your organization.</span>
-          </div>
-
-          {/* Modal Actions */}
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
             <button
               type="button"
+              className="btn-secondary"
+              onClick={handlePrefillDemo}
+              style={{ fontSize: '11px', padding: '3px 8px' }}
+            >
+              Fill sample data
+            </button>
+
+            <span style={{ color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '4px' }}>
+              <Shield size={12} />
+              <span>Encrypted at rest</span>
+            </span>
+          </div>
+
+          {/* Actions: Hick's Law -> exactly one primary CTA */}
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+            <button
+              type="button"
+              className="btn-secondary"
               onClick={onClose}
-              style={{
-                padding: '0.55rem 1rem',
-                borderRadius: '8px',
-                border: '1px solid var(--border)',
-                background: 'transparent',
-                color: 'var(--text-secondary)',
-                fontSize: '0.85rem',
-                fontWeight: 600,
-                cursor: 'pointer',
-              }}
             >
               Cancel
             </button>
@@ -347,23 +283,10 @@ export default function ConnectModal({ connector, onClose, onSave }) {
             <button
               type="submit"
               disabled={loading}
-              style={{
-                padding: '0.55rem 1.25rem',
-                borderRadius: '8px',
-                border: 'none',
-                background: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
-                color: '#ffffff',
-                fontSize: '0.85rem',
-                fontWeight: 600,
-                cursor: loading ? 'wait' : 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.45rem',
-                boxShadow: '0 2px 12px var(--accent-glow)',
-              }}
+              className="btn-primary"
             >
               {loading && <span className="spinner" />}
-              <span>{loading ? 'Verifying & Saving...' : 'Test & Save Connection'}</span>
+              <span>{loading ? 'Saving...' : (isEdit ? 'Update & re-test' : 'Test & save connection')}</span>
             </button>
           </div>
         </form>

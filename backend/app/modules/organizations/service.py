@@ -3,6 +3,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.database.models import Invitation, Membership, Organization, User
+from app.modules.audit.service import create_audit_log
 from app.modules.organizations.schemas import (
     OrganizationMemberResponse,
     PendingInvitationResponse,
@@ -31,6 +32,18 @@ def create_organization(
     )
 
     db.add(membership)
+    db.flush()
+
+    create_audit_log(
+        db=db,
+        organization_id=organization.id,
+        user_id=user_id,
+        action="ORGANIZATION_CREATED",
+        resource_type="Organization",
+        resource_id=organization.id,
+        details="Organization created",
+    )
+
     db.commit()
     db.refresh(organization)
 
@@ -219,6 +232,18 @@ def create_invitation(
     )
 
     db.add(invitation)
+    db.flush()
+
+    create_audit_log(
+        db=db,
+        organization_id=target_org_id,
+        user_id=user_id,
+        action="MEMBER_INVITED",
+        resource_type="Invitation",
+        resource_id=invitation.id,
+        details=f"Invitation created for {normalized_email}",
+    )
+
     db.commit()
     db.refresh(invitation)
 
@@ -247,6 +272,7 @@ def get_pending_invitations(
             email=invitation.email,
             role=invitation.role,
             status=invitation.status,
+            token=invitation.token,
         )
         for invitation in invitations
     ]
@@ -296,6 +322,18 @@ def accept_invitation(
     invitation.status = "accepted"
 
     db.add(membership)
+    db.flush()
+
+    create_audit_log(
+        db=db,
+        organization_id=invitation.organization_id,
+        user_id=user_id,
+        action="INVITATION_ACCEPTED",
+        resource_type="Membership",
+        resource_id=membership.id,
+        details=f"Invitation accepted with role {membership.role}",
+    )
+
     db.commit()
 
     return invitation.organization_id, invitation.role
@@ -348,7 +386,20 @@ def update_member_role(
         if admin_count is not None and admin_count <= 1:
             raise ValueError("Cannot demote the sole Admin of the organization")
 
+    old_role = target_membership.role
     target_membership.role = role
+    db.flush()
+
+    create_audit_log(
+        db=db,
+        organization_id=target_membership.organization_id,
+        user_id=current_user_id,
+        action="MEMBER_ROLE_UPDATED",
+        resource_type="Membership",
+        resource_id=target_membership.id,
+        details=f"Role changed from {old_role} to {role}",
+    )
+
     db.commit()
     db.refresh(target_membership)
 

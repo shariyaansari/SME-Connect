@@ -15,10 +15,12 @@ def test_get_connectors_catalog(client):
     response = client.get("/connectors/catalog")
     assert response.status_code == 200
     catalog = response.json()
-    assert len(catalog) >= 4
+    assert len(catalog) >= 6
     slugs = [item["slug"] for item in catalog]
     assert "google_sheets" in slugs
     assert "crm" in slugs
+    assert "stripe" in slugs
+    assert "zoho_books" in slugs
     assert "custom_api" in slugs
     assert "whatsapp" in slugs
 
@@ -32,7 +34,7 @@ def test_get_connectors_catalog(client):
     assert len(sheets_item["supported_actions"]) > 0
 
 
-def test_create_connection_success_and_masking(client):
+def test_create_connection_success_and_masking(client, db_session):
     headers = register_and_login(client, "Lead Admin", "admin@leads.com")
     client.post("/organizations", json={"name": "Sales Workspace"}, headers=headers)
 
@@ -63,6 +65,14 @@ def test_create_connection_success_and_masking(client):
     masked = conn["masked_credentials"]
     assert "super_secret_google_key_987654321" not in str(masked)
     assert "••••" in masked["client_secret"]
+
+    # Verify encrypted at rest in DB
+    from app.database.models import Connection
+    raw_conn = db_session.get(Connection, conn["id"])
+    assert "_encrypted" in raw_conn.credentials
+    assert "super_secret_google_key_987654321" not in str(raw_conn.credentials)
+
+
 
 
 def test_create_connection_invalid_slug(client):
@@ -293,3 +303,76 @@ def test_organization_isolation(client):
     # Org B user cannot delete Org A connection
     org_b_del = client.delete(f"/connectors/{conn_a_id}", headers=org_b_headers)
     assert org_b_del.status_code == 404
+
+
+def test_stripe_and_zoho_connectors(client):
+    headers = register_and_login(client, "Billing Admin", "billing@finances.com")
+    client.post("/organizations", json={"name": "Finance Org"}, headers=headers)
+
+    # Test Stripe connection
+    stripe_resp = client.post(
+        "/connectors",
+        json={
+            "connector_slug": "stripe",
+            "name": "Live Stripe Billing",
+            "config": {"account_country": "US", "environment": "live"},
+            "credentials": {"api_key": "sk_live_1234567890abcdef"},
+        },
+        headers=headers,
+    )
+    assert stripe_resp.status_code == 201
+    stripe_conn = stripe_resp.json()
+    assert stripe_conn["status"] == "active"
+    assert "sk_live_1234567890abcdef" not in str(stripe_conn["masked_credentials"])
+
+    # Test Zoho connection
+    zoho_resp = client.post(
+        "/connectors",
+        json={
+            "connector_slug": "zoho_books",
+            "name": "Zoho Production Books",
+            "config": {"organization_id": "700123456", "data_center": "com"},
+            "credentials": {"auth_token": "1000.abcdef1234567890"},
+        },
+        headers=headers,
+    )
+    assert zoho_resp.status_code == 201
+    zoho_conn = zoho_resp.json()
+    assert zoho_conn["status"] == "active"
+
+
+def test_adapter_trigger_and_action_execution():
+    from app.modules.connectors.adapters.google_sheets import GoogleSheetsAdapter
+    from app.modules.connectors.adapters.crm import CRMAdapter
+
+    sheets = GoogleSheetsAdapter()
+    config = {"spreadsheet_id": "123", "sheet_name": "Orders"}
+    creds = {"client_id": "cid", "client_secret": "csec"}
+
+    # Test trigger reading
+    records, state = sheets.read_trigger_data("new_row", config, creds, {"last_row_index": 2})
+    assert len(records) > 0
+    assert state["last_row_index"] > 2
+
+    # Test action execution
+    result = sheets.execute_action(
+        "append_row",
+        config,
+        creds,
+        {"values": {"Order ID": 1001, "Amount": 250}},
+    )
+    assert result["success"] is True
+
+    # Test CRM adapter execution
+    crm = CRMAdapter()
+    crm_config = {"crm_provider": "HubSpot"}
+    crm_creds = {"api_key": "pat-123"}
+    lead_res = crm.execute_action(
+        "create_lead",
+        crm_config,
+        crm_creds,
+        {"email": "test@lead.com", "name": "Jane Lead"},
+    )
+    assert lead_res["success"] is True
+    assert lead_res["lead_id"] is not None
+

@@ -240,4 +240,53 @@ class Connection(Base):
     )
 
     organization: Mapped["Organization"] = relationship("Organization", backref="connections")
+
+
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
+
+    id: Mapped[int] = mapped_column(
+        primary_key=True,
+        index=True,
+    )
+
+    organization_id: Mapped[int] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    action: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+    )
+
+    resource_type: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+    )
+
+    resource_id: Mapped[int | None] = mapped_column(
+        nullable=True,
+    )
+
+    details: Mapped[str | None] = mapped_column(
+        String(1000),
+        nullable=True,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utc_now,
+        nullable=False,
+    )
+
+    organization: Mapped["Organization"] = relationship("Organization", backref="audit_logs")
+    user: Mapped["User"] = relationship("User", backref="audit_logs")
 

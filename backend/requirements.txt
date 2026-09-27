@@ -6,4 +6,7 @@ pydantic-settings
 email-validator
 pwdlib[argon2]
 PyJWT
-pytest
+pytest
+httpx
+cryptography
+

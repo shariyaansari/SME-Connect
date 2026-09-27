@@ -1,238 +1,237 @@
 import React, { useState } from 'react';
-import { Search, FileSpreadsheet, Users, Globe, MessageCircle, ArrowRight, Zap, Check } from 'lucide-react';
+import {
+  Search,
+  FileSpreadsheet,
+  Users,
+  Globe,
+  MessageSquare,
+  Zap,
+  CreditCard,
+  BookOpen,
+  CheckCircle,
+  Plus
+} from 'lucide-react';
 
-export default function ConnectorCatalog({ catalog, connectedSlugs, onSelectConnector }) {
+export default function ConnectorCatalog({ catalog, connectedSlugs, onSelectConnector, canManage = true }) {
   const [search, setSearch] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All');
 
-  const categories = ['All', 'Spreadsheets', 'CRM', 'Developer Tools', 'Communication'];
+  // Derive categories dynamically from catalog with fallbacks
+  const categories = [
+    'All',
+    ...Array.from(new Set((catalog || []).map((c) => c.category))).filter(Boolean),
+  ];
 
-  const getIcon = (iconName) => {
-    switch (iconName) {
-      case 'table':
-        return <FileSpreadsheet size={24} color="#10b981" />;
-      case 'users':
-        return <Users size={24} color="#f59e0b" />;
-      case 'globe':
-        return <Globe size={24} color="#38bdf8" />;
-      case 'message-circle':
-        return <MessageCircle size={24} color="#22c55e" />;
+  const getIcon = (slug) => {
+    switch (slug) {
+      case 'google_sheets':
+        return FileSpreadsheet;
+      case 'crm':
+        return Users;
+      case 'stripe':
+        return CreditCard;
+      case 'zoho_books':
+        return BookOpen;
+      case 'custom_api':
+        return Globe;
+      case 'whatsapp':
+        return MessageSquare;
       default:
-        return <Zap size={24} color="var(--accent-light)" />;
+        return Zap;
     }
   };
 
-  const filtered = catalog.filter((item) => {
+  const filtered = (catalog || []).filter((item) => {
     const matchesSearch =
       item.name.toLowerCase().includes(search.toLowerCase()) ||
       item.description.toLowerCase().includes(search.toLowerCase()) ||
       item.category.toLowerCase().includes(search.toLowerCase());
-    const matchesCategory = selectedCategory === 'All' || item.category === selectedCategory;
-    return matchesSearch && matchesCategory;
+    const matchesCat =
+      selectedCategory === 'All' ||
+      item.category.toLowerCase().includes(selectedCategory.toLowerCase());
+    return matchesSearch && matchesCat;
   });
+
+  const availableCount = (catalog || []).filter((c) => c.slug === 'google_sheets' || c.slug === 'crm').length;
+  const roadmapCount = Math.max(0, (catalog || []).length - availableCount);
 
   return (
     <div>
-      {/* Search & Category Filter Bar */}
+      {/* Screen Title */}
+      <div style={{ marginBottom: '20px' }}>
+        <h2>App catalog</h2>
+        <p style={{ color: 'var(--text-secondary)', fontSize: '13px', marginTop: '2px' }}>
+          Connect third-party enterprise tools to power your automated workflows.
+        </p>
+      </div>
+
+      {/* 3 Metric Tiles (Miller's Law) */}
+      <div className="metric-grid">
+        <div className="metric-tile">
+          <div className="metric-tile-label">Available in MVP</div>
+          <div className="metric-tile-value">{availableCount}</div>
+        </div>
+        <div className="metric-tile">
+          <div className="metric-tile-label">Planned (P1 roadmap)</div>
+          <div className="metric-tile-value">{roadmapCount}</div>
+        </div>
+        <div className="metric-tile">
+          <div className="metric-tile-label">MVP capabilities</div>
+          <div className="metric-tile-value">Sheets & CRM</div>
+        </div>
+      </div>
+
+      {/* Filter and Search Bar */}
       <div style={{
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
-        gap: '1rem',
-        marginBottom: '1.5rem',
+        gap: '12px',
+        marginBottom: '16px',
         flexWrap: 'wrap',
       }}>
-        {/* Category Pills */}
-        <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
-          {categories.map((cat) => (
-            <button
-              key={cat}
-              onClick={() => setSelectedCategory(cat)}
-              style={{
-                padding: '0.4rem 0.85rem',
-                borderRadius: '8px',
-                fontSize: '0.82rem',
-                fontWeight: 600,
-                border: selectedCategory === cat ? '1px solid var(--accent)' : '1px solid var(--border)',
-                background: selectedCategory === cat ? 'rgba(99, 102, 241, 0.18)' : 'rgba(255, 255, 255, 0.03)',
-                color: selectedCategory === cat ? 'var(--accent-light)' : 'var(--text-secondary)',
-                cursor: 'pointer',
-                transition: 'all 0.2s',
-              }}
-            >
-              {cat}
-            </button>
-          ))}
+        {/* Category Pills (sentence case) */}
+        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+          {categories.map((cat) => {
+            const isSelected = selectedCategory === cat;
+            return (
+              <button
+                key={cat}
+                onClick={() => setSelectedCategory(cat)}
+                style={{
+                  padding: '4px 10px',
+                  borderRadius: '6px',
+                  border: isSelected ? '1px solid var(--border-strong)' : '1px solid var(--border)',
+                  backgroundColor: isSelected ? 'var(--surface-hover)' : 'transparent',
+                  color: isSelected ? 'var(--text-primary)' : 'var(--text-secondary)',
+                  fontSize: '12px',
+                  fontWeight: isSelected ? 500 : 400,
+                  cursor: 'pointer',
+                  transition: 'background-color 0.15s ease',
+                }}
+              >
+                {cat}
+              </button>
+            );
+          })}
         </div>
 
-        {/* Search Input */}
-        <div style={{ position: 'relative', width: '280px' }}>
-          <Search size={16} color="var(--text-muted)" style={{ position: 'absolute', left: '10px', top: '10px' }} />
+        {/* Search input */}
+        <div style={{ position: 'relative', width: '240px' }}>
+          <Search size={14} style={{ position: 'absolute', left: '9px', top: '8px', color: 'var(--text-muted)' }} />
           <input
             type="text"
-            placeholder="Search integrations..."
+            className="form-input"
+            placeholder="Search catalog..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            style={{
-              width: '100%',
-              padding: '0.5rem 0.75rem 0.5rem 2.2rem',
-              borderRadius: '8px',
-              border: '1px solid var(--border)',
-              background: 'rgba(255, 255, 255, 0.04)',
-              color: '#ffffff',
-              fontSize: '0.85rem',
-              outline: 'none',
-            }}
+            style={{ paddingLeft: '28px', fontSize: '12px' }}
           />
         </div>
       </div>
 
-      {/* Catalog Grid */}
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))',
-        gap: '1.25rem',
-      }}>
+      {/* Dense List: surface-2 container with hairline dividers */}
+      <div className="list-container">
         {filtered.map((connector) => {
+          const Icon = getIcon(connector.slug);
           const isConnected = connectedSlugs.includes(connector.slug);
+          const isMvp = connector.slug === 'google_sheets' || connector.slug === 'crm';
+          const isWhatsapp = connector.slug === 'whatsapp';
+
+          let statusBadgeText = 'Available';
+          let statusBadgeClass = 'success';
+          if (!isMvp) {
+            statusBadgeClass = 'neutral';
+            statusBadgeText = isWhatsapp ? 'P1 Roadmap' : 'Coming soon / P1';
+          } else if (isConnected) {
+            statusBadgeText = 'Connected';
+            statusBadgeClass = 'success';
+          }
 
           return (
-            <div
-              key={connector.slug}
-              className="glass-panel"
-              style={{
-                padding: '1.4rem',
-                display: 'flex',
-                flexDirection: 'column',
-                justifyContent: 'space-between',
-                transition: 'transform 0.2s, border-color 0.2s, box-shadow 0.2s',
-                cursor: 'default',
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.transform = 'translateY(-2px)';
-                e.currentTarget.style.borderColor = 'rgba(99, 102, 241, 0.4)';
-                e.currentTarget.style.boxShadow = 'var(--shadow-md)';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.transform = 'translateY(0)';
-                e.currentTarget.style.borderColor = 'var(--border)';
-                e.currentTarget.style.boxShadow = 'none';
-              }}
-            >
-              <div>
-                {/* Header: Icon, Name, Category */}
-                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '0.85rem' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                    <div style={{
-                      width: '44px',
-                      height: '44px',
-                      borderRadius: '12px',
-                      background: 'rgba(255, 255, 255, 0.05)',
-                      border: '1px solid var(--border)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                    }}>
-                      {getIcon(connector.icon)}
-                    </div>
-                    <div>
-                      <h3 style={{ fontSize: '1.05rem', color: '#ffffff', marginBottom: '0.15rem' }}>{connector.name}</h3>
-                      <span style={{
-                        fontSize: '0.72rem',
-                        fontWeight: 600,
-                        color: 'var(--text-muted)',
-                        textTransform: 'uppercase',
-                        letterSpacing: '0.04em',
-                      }}>
-                        {connector.category}
-                      </span>
-                    </div>
-                  </div>
-
-                  {isConnected && (
+            <div key={connector.slug} className="list-row">
+              {/* Left: Leading icon + Title + Description + Triggers & Actions */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flex: 1, minWidth: 0, paddingRight: '16px' }}>
+                <Icon size={18} style={{ color: 'var(--text-secondary)', flexShrink: 0 }} />
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '14px', fontWeight: 500, color: 'var(--text-primary)' }}>
+                      {connector.name}
+                    </span>
                     <span style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '0.25rem',
-                      padding: '0.2rem 0.55rem',
-                      borderRadius: '9999px',
-                      background: 'var(--success-bg)',
-                      border: '1px solid var(--success-border)',
-                      color: 'var(--success)',
-                      fontSize: '0.72rem',
-                      fontWeight: 700,
+                      fontSize: '11px',
+                      color: 'var(--text-muted)',
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.04em',
                     }}>
-                      <Check size={12} />
-                      Connected
-                    </span>
-                  )}
-                </div>
-
-                {/* Description */}
-                <p style={{
-                  fontSize: '0.85rem',
-                  color: 'var(--text-secondary)',
-                  lineHeight: 1.45,
-                  marginBottom: '1.25rem',
-                  minHeight: '2.5rem',
-                }}>
-                  {connector.description}
-                </p>
-
-                {/* Capabilities (Triggers & Actions) */}
-                <div style={{
-                  background: 'rgba(0, 0, 0, 0.25)',
-                  padding: '0.75rem',
-                  borderRadius: '8px',
-                  border: '1px solid rgba(255, 255, 255, 0.04)',
-                  marginBottom: '1.25rem',
-                  fontSize: '0.78rem',
-                }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.35rem' }}>
-                    <span style={{ color: 'var(--text-muted)' }}>Triggers:</span>
-                    <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>
-                      {connector.supported_triggers.map((t) => t.name).join(', ') || 'None'}
+                      {connector.category}
                     </span>
                   </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ color: 'var(--text-muted)' }}>Actions:</span>
-                    <span style={{ color: 'var(--accent-light)', fontWeight: 600 }}>
-                      {connector.supported_actions.map((a) => a.name).join(', ')}
-                    </span>
+
+                  <div style={{
+                    fontSize: '12px',
+                    color: 'var(--text-secondary)',
+                    marginTop: '2px',
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                  }}>
+                    {connector.description}
+                  </div>
+
+                  <div style={{
+                    fontSize: '11px',
+                    color: 'var(--text-muted)',
+                    marginTop: '2px',
+                  }}>
+                    {isMvp ? (
+                      <>Triggers: {connector.supported_triggers?.map((t) => t.name).join(', ') || 'None'} • Actions: {connector.supported_actions?.map((a) => a.name).join(', ')}</>
+                    ) : (
+                      <>Scheduled for post-MVP release (P1)</>
+                    )}
                   </div>
                 </div>
               </div>
 
-              {/* Action Button */}
-              <button
-                onClick={() => onSelectConnector(connector)}
-                style={{
-                  width: '100%',
-                  padding: '0.6rem',
-                  borderRadius: '8px',
-                  border: isConnected ? '1px solid var(--border-light)' : 'none',
-                  background: isConnected
-                    ? 'rgba(255, 255, 255, 0.06)'
-                    : 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
-                  color: '#ffffff',
-                  fontWeight: 600,
-                  fontSize: '0.85rem',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '0.4rem',
-                  transition: 'background 0.2s, box-shadow 0.2s',
-                  boxShadow: isConnected ? 'none' : '0 2px 8px var(--accent-glow)',
-                }}
-              >
-                <span>{isConnected ? 'Add Another Connection' : 'Connect Application'}</span>
-                <ArrowRight size={14} />
-              </button>
+              {/* Right: Status Pill + Connect Button */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexShrink: 0 }}>
+                <span className={`status-pill ${statusBadgeClass}`}>
+                  {isConnected && <CheckCircle size={12} />}
+                  <span>{statusBadgeText}</span>
+                </span>
+
+                {isMvp ? (
+                  <button
+                    className="btn-secondary"
+                    onClick={() => onSelectConnector(connector)}
+                    disabled={!canManage}
+                    title={canManage ? (isConnected ? 'Add another connection' : 'Connect application') : 'Viewer role has read-only access'}
+                    style={{
+                      fontSize: '12px',
+                      padding: '4px 10px',
+                      opacity: canManage ? 1 : 0.5,
+                      cursor: canManage ? 'pointer' : 'not-allowed',
+                    }}
+                  >
+                    <Plus size={13} />
+                    <span>{isConnected ? 'Add another' : 'Connect'}</span>
+                  </button>
+                ) : (
+                  <button
+                    className="btn-secondary"
+                    disabled
+                    title="Scheduled for P1 implementation"
+                    style={{ fontSize: '12px', padding: '4px 10px', opacity: 0.5, cursor: 'not-allowed' }}
+                  >
+                    <span>{isWhatsapp ? 'P1' : 'Coming soon'}</span>
+                  </button>
+                )}
+              </div>
             </div>
           );
         })}
       </div>
+
     </div>
   );
 }
