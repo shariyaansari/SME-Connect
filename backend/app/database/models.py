@@ -341,6 +341,11 @@ class Workflow(Base):
         nullable=False,
     )
 
+    template_id: Mapped[int | None] = mapped_column(
+        ForeignKey("templates.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
     organization: Mapped["Organization"] = relationship("Organization", backref="workflows")
     creator: Mapped["User"] = relationship("User", foreign_keys=[created_by], backref="created_workflows")
     versions: Mapped[list["WorkflowVersion"]] = relationship(
@@ -421,4 +426,74 @@ def check_workflow_version_immutability(mapper, connection, target):
                 raise ValueError(
                     f"Workflow version {target.version_number} is immutable because it has already been published. "
                     f"Cannot modify '{field_name}'."
-                )
+                )
+
+
+class Template(Base):
+    __tablename__ = "templates"
+
+    id: Mapped[int] = mapped_column(
+        primary_key=True,
+        index=True,
+    )
+
+    name: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+    )
+
+    description: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+    )
+
+    category: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+    )
+
+    difficulty: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+    )
+
+    industry_tags: Mapped[list[str]] = mapped_column(
+        JSONB,
+        nullable=False,
+        default=list,
+    )
+
+    app_slugs: Mapped[list[str]] = mapped_column(
+        JSONB,
+        nullable=False,
+        default=list,
+    )
+
+    definition: Mapped[dict] = mapped_column(
+        JSONB,
+        nullable=False,
+    )
+
+    setup_schema: Mapped[dict] = mapped_column(
+        JSONB,
+        nullable=False,
+    )
+
+    is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+        nullable=False,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utc_now,
+        nullable=False,
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utc_now,
+        onupdate=utc_now,
+        nullable=False,
+    )

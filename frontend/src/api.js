@@ -164,4 +164,8 @@ export const api = {
   pauseWorkflow: (id) => request(`/workflows/${id}/pause`, {
     method: 'POST',
   }),
+
+  // Templates (Module 3A)
+  fetchTemplates: () => request('/templates/'),
+  fetchTemplate: (id) => request(`/templates/${id}`),
 };

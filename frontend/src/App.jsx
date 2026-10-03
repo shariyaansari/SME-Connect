@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import Header from './components/Header';
 import WorkflowsView from './components/WorkflowsView';
+import TemplatesView from './components/TemplatesView';
 import ConnectedApps from './components/ConnectedApps';
 import ConnectorCatalog from './components/ConnectorCatalog';
 import TeamWorkspaceView from './components/TeamWorkspaceView';
@@ -24,7 +25,7 @@ export default function App() {
   const [members, setMembers] = useState([]);
   const [pendingInvitations, setPendingInvitations] = useState([]);
 
-  const [activeTab, setActiveTab] = useState('workflows');
+  const [activeTab, setActiveTab] = useState('templates');
   const [selectedConnector, setSelectedConnector] = useState(null);
   const [editingConnection, setEditingConnection] = useState(null);
   const [showInviteModal, setShowInviteModal] = useState(false);
@@ -319,6 +320,13 @@ export default function App() {
               <ArrowRight size={13} />
             </button>
           </div>
+        )}
+
+        {activeTab === 'templates' && (
+          <TemplatesView
+            onNavigateWorkflows={() => setActiveTab('workflows')}
+            onNavigateConnectors={() => setActiveTab('connected')}
+          />
         )}
 
         {activeTab === 'workflows' && (

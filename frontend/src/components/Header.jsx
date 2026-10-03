@@ -205,6 +205,7 @@ export default function Header({
         {/* Center: Navigation tabs in sentence case */}
         <nav style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
           {[
+            { id: 'templates', label: 'Templates' },
             { id: 'workflows', label: 'Workflows' },
             { id: 'connected', label: 'Connected apps', count: connectionsCount },
             { id: 'catalog', label: 'App catalog' },
