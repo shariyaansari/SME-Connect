@@ -478,48 +478,43 @@ export default function WorkflowsView({ onNavigateConnectors }) {
         {activeWorkflowId && draftDefinition ? (
           <div style={{
             display: 'flex',
+            flexDirection: 'column',
             alignItems: 'center',
-            gap: '8px',
-            overflowX: 'auto',
-            paddingBottom: '8px',
+            gap: '0', // We use vertical lines for gap
+            paddingBottom: '24px',
+            paddingTop: '16px'
           }}>
             {/* TRIGGER CARD */}
             <div
               onClick={openTriggerModal}
               style={{
-              width: '150px',
-              minWidth: '150px',
+              width: '280px',
               backgroundColor: 'var(--surface-1)',
-              borderRadius: '6px',
-              borderLeft: '2px solid var(--trigger-accent)',
-              padding: '10px 12px',
+              borderRadius: '8px',
+              border: '1px solid var(--border)',
+              borderLeft: '4px solid var(--trigger-accent)',
+              padding: '12px 16px',
               display: 'flex',
               flexDirection: 'column',
-              gap: '4px',
+              gap: '6px',
               cursor: 'pointer',
-              border: '1px solid transparent',
-              transition: 'border-color 0.2s',
+              transition: 'all 0.2s',
+              boxShadow: '0 2px 8px rgba(0,0,0,0.05)',
             }}
-            onMouseEnter={(e) => e.currentTarget.style.borderColor = 'var(--trigger-accent)'}
-            onMouseLeave={(e) => e.currentTarget.style.borderColor = 'transparent'}
+            onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'var(--trigger-accent)'; e.currentTarget.style.transform = 'translateY(-2px)'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.transform = 'translateY(0)'; }}
             >
               <span className="kicker-label kicker-trigger">TRIGGER</span>
               <span style={{
-                fontSize: '13px',
-                fontWeight: 500,
+                fontSize: '14px',
+                fontWeight: 600,
                 color: 'var(--text-primary)',
-                whiteSpace: 'nowrap',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
               }}>
                 {draftDefinition?.trigger?.event ? getEventName(draftDefinition?.trigger?.connector, draftDefinition?.trigger?.event) : 'Unconfigured Trigger'}
               </span>
               <span style={{
                 fontSize: '12px',
                 color: 'var(--text-secondary)',
-                whiteSpace: 'nowrap',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
               }}>
                 {draftDefinition?.trigger?.connector ? getConnectorName(draftDefinition?.trigger?.connector) : 'Click to configure'}
               </span>
@@ -532,15 +527,15 @@ export default function WorkflowsView({ onNavigateConnectors }) {
                    return null;
                  }
 
-                 let borderColor = 'var(--action-accent)';
+                 let leftBorder = 'var(--action-accent)';
                  let kickerClass = 'kicker-action';
                  if (step.type === 'condition') {
-                   borderColor = 'var(--condition-accent)';
+                   leftBorder = 'var(--condition-accent)';
                    kickerClass = 'kicker-condition';
                  }
                  return (
                    <React.Fragment key={step.id}>
-                     <span style={{ color: 'var(--text-muted)', fontSize: '18px', userSelect: 'none', padding: '0 4px' }}>&rarr;</span>
+                     <div style={{ width: '2px', height: '24px', backgroundColor: 'var(--border)' }} />
                      <div
                        onClick={() => {
                          setEditingStepId(step.id);
@@ -553,35 +548,33 @@ export default function WorkflowsView({ onNavigateConnectors }) {
                          }
                        }}
                        style={{
-                         width: '150px',
-                         minWidth: '150px',
+                         width: '280px',
                          backgroundColor: 'var(--surface-1)',
-                         borderRadius: '6px',
-                         borderLeft: `2px solid ${borderColor}`,
-                         padding: '10px 12px',
+                         borderRadius: '8px',
+                         border: '1px solid var(--border)',
+                         borderLeft: `4px solid ${leftBorder}`,
+                         padding: '12px 16px',
                          display: 'flex',
                          flexDirection: 'column',
-                         gap: '4px',
+                         gap: '6px',
                          cursor: 'pointer',
+                         transition: 'all 0.2s',
+                         boxShadow: '0 2px 8px rgba(0,0,0,0.05)',
                        }}
+                       onMouseEnter={(e) => { e.currentTarget.style.borderColor = leftBorder; e.currentTarget.style.transform = 'translateY(-2px)'; }}
+                       onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.transform = 'translateY(0)'; }}
                      >
                        <span className={`kicker-label ${kickerClass}`}>{step.type.toUpperCase()}</span>
                        <span style={{
-                         fontSize: '13px',
-                         fontWeight: 500,
+                         fontSize: '14px',
+                         fontWeight: 600,
                          color: 'var(--text-primary)',
-                         whiteSpace: 'nowrap',
-                         overflow: 'hidden',
-                         textOverflow: 'ellipsis',
                        }}>
                          {step.action || step.field || 'Config'}
                        </span>
                        <span style={{
                          fontSize: '12px',
                          color: 'var(--text-secondary)',
-                         whiteSpace: 'nowrap',
-                         overflow: 'hidden',
-                         textOverflow: 'ellipsis',
                        }}>
                          {step.connector || step.operator || 'Builder step'}
                        </span>
@@ -591,42 +584,44 @@ export default function WorkflowsView({ onNavigateConnectors }) {
             })}
 
             {/* Add Step Buttons */}
-            <span style={{ color: 'var(--text-muted)', fontSize: '18px', userSelect: 'none', padding: '0 4px' }}>&rarr;</span>
-            <div style={{ display: 'flex', gap: '8px' }}>
-              <button
-                className="btn-secondary"
-                style={{
-                  borderRadius: '20px',
-                  padding: '8px 16px',
-                  backgroundColor: 'var(--surface-0)',
-                  borderStyle: 'dashed'
-                }}
-                onClick={() => {
-                  setEditingStepId(null);
-                  setActionForm({ connector: '', action: '', config: {}, mapping: {} });
-                  setShowActionModal(true);
-                }}
-              >
-                <Plus size={14} style={{ marginRight: '6px' }} />
-                Add Action
-              </button>
-              <button
-                className="btn-secondary"
-                style={{
-                  borderRadius: '20px',
-                  padding: '8px 16px',
-                  backgroundColor: 'var(--surface-0)',
-                  borderStyle: 'dashed'
-                }}
-                onClick={() => {
-                  setEditingStepId(null);
-                  setConditionForm({ field: '', operator: 'equals', value: '' });
-                  setShowConditionModal(true);
-                }}
-              >
-                <Plus size={14} style={{ marginRight: '6px' }} />
-                Add Condition
-              </button>
+            <div style={{ width: '2px', height: '24px', backgroundColor: 'var(--border)' }} />
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', alignItems: 'center' }}>
+              <div style={{ display: 'flex', gap: '12px' }}>
+                <button
+                  className="btn-secondary"
+                  style={{
+                    borderRadius: '20px',
+                    padding: '8px 16px',
+                    backgroundColor: 'var(--surface-0)',
+                    borderStyle: 'dashed'
+                  }}
+                  onClick={() => {
+                    setEditingStepId(null);
+                    setActionForm({ connector: '', action: '', config: {}, mapping: {} });
+                    setShowActionModal(true);
+                  }}
+                >
+                  <Plus size={14} style={{ marginRight: '6px' }} />
+                  Add Action
+                </button>
+                <button
+                  className="btn-secondary"
+                  style={{
+                    borderRadius: '20px',
+                    padding: '8px 16px',
+                    backgroundColor: 'var(--surface-0)',
+                    borderStyle: 'dashed'
+                  }}
+                  onClick={() => {
+                    setEditingStepId(null);
+                    setConditionForm({ field: '', operator: 'equals', value: '' });
+                    setShowConditionModal(true);
+                  }}
+                >
+                  <Plus size={14} style={{ marginRight: '6px' }} />
+                  Add Condition
+                </button>
+              </div>
             </div>
           </div>
         ) : (
@@ -749,13 +744,15 @@ export default function WorkflowsView({ onNavigateConnectors }) {
       {showTriggerModal && (
         <div style={{
           position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-          backgroundColor: 'rgba(0, 0, 0, 0.7)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          zIndex: 100, padding: '16px',
+          backgroundColor: 'rgba(0, 0, 0, 0.4)',
+          display: 'flex', justifyContent: 'flex-end',
+          zIndex: 100,
         }}>
           <div style={{
-            backgroundColor: 'var(--surface-2)', border: '1px solid var(--border)',
-            borderRadius: '10px', maxWidth: '500px', width: '100%', padding: '20px',
+            backgroundColor: 'var(--surface-2)', borderLeft: '1px solid var(--border)',
+            width: '450px', maxWidth: '100vw', padding: '24px', height: '100%', overflowY: 'auto',
+            boxShadow: '-4px 0 24px rgba(0,0,0,0.2)',
+            animation: 'slideInRight 0.2s ease-out'
           }}>
             <h3 style={{ marginBottom: '4px' }}>Configure Trigger</h3>
             <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '16px' }}>
@@ -813,14 +810,15 @@ export default function WorkflowsView({ onNavigateConnectors }) {
       {showActionModal && (
         <div style={{
           position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-          backgroundColor: 'rgba(0, 0, 0, 0.7)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          zIndex: 100, padding: '16px',
+          backgroundColor: 'rgba(0, 0, 0, 0.4)',
+          display: 'flex', justifyContent: 'flex-end',
+          zIndex: 100,
         }}>
           <div style={{
-            backgroundColor: 'var(--surface-2)', border: '1px solid var(--border)',
-            borderRadius: '10px', maxWidth: '500px', width: '100%', padding: '20px',
-            maxHeight: '80vh', overflowY: 'auto',
+            backgroundColor: 'var(--surface-2)', borderLeft: '1px solid var(--border)',
+            width: '450px', maxWidth: '100vw', padding: '24px', height: '100%', overflowY: 'auto',
+            boxShadow: '-4px 0 24px rgba(0,0,0,0.2)',
+            animation: 'slideInRight 0.2s ease-out'
           }}>
             <h3 style={{ marginBottom: '4px' }}>Configure Action</h3>
             <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '16px' }}>
@@ -954,13 +952,15 @@ export default function WorkflowsView({ onNavigateConnectors }) {
       {showConditionModal && (
         <div style={{
           position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-          backgroundColor: 'rgba(0, 0, 0, 0.7)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          zIndex: 100, padding: '16px',
+          backgroundColor: 'rgba(0, 0, 0, 0.4)',
+          display: 'flex', justifyContent: 'flex-end',
+          zIndex: 100,
         }}>
           <div style={{
-            backgroundColor: 'var(--surface-2)', border: '1px solid var(--border)',
-            borderRadius: '10px', maxWidth: '500px', width: '100%', padding: '20px',
+            backgroundColor: 'var(--surface-2)', borderLeft: '1px solid var(--border)',
+            width: '450px', maxWidth: '100vw', padding: '24px', height: '100%', overflowY: 'auto',
+            boxShadow: '-4px 0 24px rgba(0,0,0,0.2)',
+            animation: 'slideInRight 0.2s ease-out'
           }}>
             <h3 style={{ marginBottom: '4px' }}>Configure Condition</h3>
             <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '16px' }}>
