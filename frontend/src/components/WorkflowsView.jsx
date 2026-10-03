@@ -4,9 +4,103 @@ import {
   CheckCircle,
   PauseCircle,
   Plus,
-  Trash2
+  Trash2,
+  GripVertical
 } from 'lucide-react';
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+} from '@dnd-kit/core';
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy,
+  useSortable
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { api } from '../api';
+
+function SortableStepItem({ step, index, editingStepId, setEditingStepId, setConditionForm, setShowConditionModal, setActionForm, setShowActionModal }) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: step.id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    zIndex: isDragging ? 50 : 1,
+    position: 'relative',
+    opacity: isDragging ? 0.8 : 1,
+  };
+
+  let leftBorder = 'var(--action-accent)';
+  let kickerClass = 'kicker-action';
+  if (step.type === 'condition') {
+    leftBorder = 'var(--condition-accent)';
+    kickerClass = 'kicker-condition';
+  }
+
+  return (
+    <div ref={setNodeRef} style={style}>
+      <div
+        onClick={() => {
+          setEditingStepId(step.id);
+          if (step.type === 'condition') {
+            setConditionForm({ field: step.field || '', operator: step.operator || 'equals', value: step.value || '' });
+            setShowConditionModal(true);
+          } else {
+            setActionForm({ connector: step.connector, action: step.action, config: step.config || {}, mapping: step.mapping || {} });
+            setShowActionModal(true);
+          }
+        }}
+        style={{
+          width: '280px',
+          backgroundColor: 'var(--surface-1)',
+          borderRadius: '8px',
+          border: '1px solid var(--border)',
+          borderLeft: `4px solid ${leftBorder}`,
+          padding: '12px 16px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '6px',
+          cursor: 'pointer',
+          transition: isDragging ? 'none' : 'all 0.2s',
+          boxShadow: isDragging ? '0 12px 24px rgba(0,0,0,0.15)' : '0 2px 8px rgba(0,0,0,0.05)',
+        }}
+        onMouseEnter={(e) => { if(!isDragging){ e.currentTarget.style.borderColor = leftBorder; e.currentTarget.style.transform = 'translateY(-2px)'; } }}
+        onMouseLeave={(e) => { if(!isDragging){ e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.transform = 'translateY(0)'; } }}
+      >
+        <div style={{ position: 'absolute', left: '-24px', top: '50%', transform: 'translateY(-50%)', cursor: 'grab', color: 'var(--text-muted)' }} {...attributes} {...listeners}>
+           <GripVertical size={16} />
+        </div>
+        <span className={`kicker-label ${kickerClass}`}>{step.type.toUpperCase()}</span>
+        <span style={{
+          fontSize: '14px',
+          fontWeight: 600,
+          color: 'var(--text-primary)',
+        }}>
+          {step.action || step.field || 'Config'}
+        </span>
+        <span style={{
+          fontSize: '12px',
+          color: 'var(--text-secondary)',
+        }}>
+          {step.connector || step.operator || 'Builder step'}
+        </span>
+      </div>
+    </div>
+  );
+}
 
 export default function WorkflowsView({ onNavigateConnectors }) {
   const [workflows, setWorkflows] = useState([]);
@@ -24,6 +118,8 @@ export default function WorkflowsView({ onNavigateConnectors }) {
   const [showActionModal, setShowActionModal] = useState(false);
   const [actionForm, setActionForm] = useState({ connector: '', action: '', config: {}, mapping: {} });
   const [editingStepId, setEditingStepId] = useState(null);
+  const [insertIndex, setInsertIndex] = useState(null);
+  const [showInsertMenu, setShowInsertMenu] = useState(null);
   const [showConditionModal, setShowConditionModal] = useState(false);
   const [conditionForm, setConditionForm] = useState({ field: '', operator: 'equals', value: '' });
 
@@ -39,6 +135,36 @@ export default function WorkflowsView({ onNavigateConnectors }) {
     { value: 'is_empty', label: 'Is Empty' },
     { value: 'is_not_empty', label: 'Is Not Empty' }
   ];
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  );
+
+  const handleDragEnd = async (event) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    
+    const oldIndex = draftDefinition.steps.findIndex(s => s.id === active.id);
+    const newIndex = draftDefinition.steps.findIndex(s => s.id === over.id);
+    
+    const newSteps = arrayMove(draftDefinition.steps, oldIndex, newIndex);
+    const newDef = { ...draftDefinition, steps: newSteps };
+    setDraftDefinition(newDef);
+    
+    if (activeWorkflowId !== 'new') {
+      try {
+        const updated = await api.updateWorkflow(activeWorkflowId, { definition: newDef });
+        setDraftDefinition(updated.definition);
+        setValidationResult({ valid: true });
+        await loadData();
+      } catch (err) {
+        console.error(err);
+        if (err.validationErrors) setValidationResult({ valid: false, errors: err.validationErrors });
+        else setValidationResult({ valid: false, errors: err.message });
+      }
+    }
+  };
 
   useEffect(() => {
     loadData();
@@ -169,7 +295,12 @@ export default function WorkflowsView({ onNavigateConnectors }) {
     if (editingStepId && editingStepId !== 'step-placeholder') {
       newSteps = newSteps.map(s => s.id === editingStepId ? { ...s, ...conditionData } : s);
     } else {
-      newSteps.push({ id: `step-${Date.now()}`, ...conditionData });
+      const newStep = { id: `step-${Date.now()}`, ...conditionData };
+      if (insertIndex !== null) {
+        newSteps.splice(insertIndex, 0, newStep);
+      } else {
+        newSteps.push(newStep);
+      }
     }
 
     const newDef = { ...draftDefinition, steps: newSteps };
@@ -222,7 +353,12 @@ export default function WorkflowsView({ onNavigateConnectors }) {
       newSteps = newSteps.map(s => s.id === editingStepId ? { ...s, ...actionData } : s);
     } else {
       // Append new step
-      newSteps.push({ id: `step-${Date.now()}`, ...actionData });
+      const newStep = { id: `step-${Date.now()}`, ...actionData };
+      if (insertIndex !== null) {
+        newSteps.splice(insertIndex, 0, newStep);
+      } else {
+        newSteps.push(newStep);
+      }
     }
 
     const newDef = { ...draftDefinition, steps: newSteps };
@@ -521,67 +657,59 @@ export default function WorkflowsView({ onNavigateConnectors }) {
             </div>
 
             {/* Step Cards */}
-            {((draftDefinition && draftDefinition.steps) || []).map((step) => {
-                 // Skip empty placeholder steps
-                 if (step.id === 'step-placeholder' || (!step.connector && !step.action && !step.field)) {
-                   return null;
-                 }
+            <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+              <SortableContext items={((draftDefinition && draftDefinition.steps) || []).map(s => s.id)} strategy={verticalListSortingStrategy}>
+                {((draftDefinition && draftDefinition.steps) || []).map((step, index) => {
+                     // Skip empty placeholder steps
+                     if (step.id === 'step-placeholder' || (!step.connector && !step.action && !step.field)) {
+                       return null;
+                     }
 
-                 let leftBorder = 'var(--action-accent)';
-                 let kickerClass = 'kicker-action';
-                 if (step.type === 'condition') {
-                   leftBorder = 'var(--condition-accent)';
-                   kickerClass = 'kicker-condition';
-                 }
-                 return (
-                   <React.Fragment key={step.id}>
-                     <div style={{ width: '2px', height: '24px', backgroundColor: 'var(--border)' }} />
-                     <div
-                       onClick={() => {
-                         setEditingStepId(step.id);
-                         if (step.type === 'condition') {
-                           setConditionForm({ field: step.field || '', operator: step.operator || 'equals', value: step.value || '' });
-                           setShowConditionModal(true);
-                         } else {
-                           setActionForm({ connector: step.connector, action: step.action, config: step.config || {}, mapping: step.mapping || {} });
-                           setShowActionModal(true);
-                         }
-                       }}
-                       style={{
-                         width: '280px',
-                         backgroundColor: 'var(--surface-1)',
-                         borderRadius: '8px',
-                         border: '1px solid var(--border)',
-                         borderLeft: `4px solid ${leftBorder}`,
-                         padding: '12px 16px',
-                         display: 'flex',
-                         flexDirection: 'column',
-                         gap: '6px',
-                         cursor: 'pointer',
-                         transition: 'all 0.2s',
-                         boxShadow: '0 2px 8px rgba(0,0,0,0.05)',
-                       }}
-                       onMouseEnter={(e) => { e.currentTarget.style.borderColor = leftBorder; e.currentTarget.style.transform = 'translateY(-2px)'; }}
-                       onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.transform = 'translateY(0)'; }}
-                     >
-                       <span className={`kicker-label ${kickerClass}`}>{step.type.toUpperCase()}</span>
-                       <span style={{
-                         fontSize: '14px',
-                         fontWeight: 600,
-                         color: 'var(--text-primary)',
-                       }}>
-                         {step.action || step.field || 'Config'}
-                       </span>
-                       <span style={{
-                         fontSize: '12px',
-                         color: 'var(--text-secondary)',
-                       }}>
-                         {step.connector || step.operator || 'Builder step'}
-                       </span>
-                     </div>
-                   </React.Fragment>
-                 );
-            })}
+                     return (
+                       <React.Fragment key={step.id}>
+                         <div style={{ position: 'relative', width: '2px', height: '32px', backgroundColor: 'var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                           <button
+                             onClick={(e) => { e.stopPropagation(); setShowInsertMenu(showInsertMenu === index ? null : index); }}
+                             style={{
+                               position: 'absolute',
+                               width: '20px', height: '20px', borderRadius: '50%',
+                               backgroundColor: 'var(--surface-0)', border: '1px solid var(--border)',
+                               display: 'flex', alignItems: 'center', justifyContent: 'center',
+                               cursor: 'pointer', zIndex: 10, color: 'var(--text-secondary)'
+                             }}
+                             title="Insert step here"
+                             onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--text-primary)'; e.currentTarget.style.borderColor = 'var(--text-primary)'; }}
+                             onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-secondary)'; e.currentTarget.style.borderColor = 'var(--border)'; }}
+                           >
+                             <Plus size={12} />
+                           </button>
+                           {showInsertMenu === index && (
+                             <div style={{
+                               position: 'absolute', left: '20px', top: '50%', transform: 'translateY(-50%)',
+                               backgroundColor: 'var(--surface-1)', border: '1px solid var(--border)', borderRadius: '6px',
+                               padding: '8px', display: 'flex', flexDirection: 'column', gap: '4px', zIndex: 20,
+                               boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
+                             }}>
+                               <button className="btn-secondary" style={{ fontSize: '12px', padding: '4px 8px' }} onClick={() => { setInsertIndex(index); setShowActionModal(true); setShowInsertMenu(null); }}>Action</button>
+                               <button className="btn-secondary" style={{ fontSize: '12px', padding: '4px 8px' }} onClick={() => { setInsertIndex(index); setShowConditionModal(true); setShowInsertMenu(null); }}>Condition</button>
+                             </div>
+                           )}
+                         </div>
+                         <SortableStepItem
+                           step={step}
+                           index={index}
+                           editingStepId={editingStepId}
+                           setEditingStepId={setEditingStepId}
+                           setConditionForm={setConditionForm}
+                           setShowConditionModal={setShowConditionModal}
+                           setActionForm={setActionForm}
+                           setShowActionModal={setShowActionModal}
+                         />
+                       </React.Fragment>
+                     );
+                })}
+              </SortableContext>
+            </DndContext>
 
             {/* Add Step Buttons */}
             <div style={{ width: '2px', height: '24px', backgroundColor: 'var(--border)' }} />
@@ -874,7 +1002,7 @@ export default function WorkflowsView({ onNavigateConnectors }) {
                   {Object.entries(selectedAction.input_schema).map(([key, field]) => (
                     <div key={key} className="form-group" style={{ marginBottom: '12px' }}>
                       <label style={{ fontSize: '12px' }}>{field.label || key} {field.required ? '*' : ''}</label>
-                      <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                         <select
                           value={actionForm.mapping?.[key] || ''}
                           onChange={(e) => {
@@ -882,7 +1010,7 @@ export default function WorkflowsView({ onNavigateConnectors }) {
                             if (e.target.value) { newMapping[key] = e.target.value; } else { delete newMapping[key]; }
                             setActionForm({ ...actionForm, mapping: newMapping });
                           }}
-                          style={{ flex: 1, padding: '8px', borderRadius: '4px', border: '1px solid var(--border)', backgroundColor: 'var(--surface-0)', color: 'var(--text-primary)' }}
+                          style={{ width: '100%', minWidth: 0, padding: '8px', borderRadius: '4px', border: '1px solid var(--border)', backgroundColor: 'var(--surface-0)', color: 'var(--text-primary)' }}
                         >
                           <option value="">Static value</option>
                           <optgroup label="Trigger Outputs">
@@ -897,11 +1025,11 @@ export default function WorkflowsView({ onNavigateConnectors }) {
                             value={actionForm.config?.[key] || ''}
                             onChange={(e) => setActionForm({ ...actionForm, config: { ...actionForm.config, [key]: e.target.value } })}
                             placeholder={field.description || 'Enter value...'}
-                            style={{ flex: 1, padding: '8px', borderRadius: '4px', border: '1px solid var(--border)', backgroundColor: 'var(--surface-0)', color: 'var(--text-primary)' }}
+                            style={{ width: '100%', minWidth: 0, padding: '8px', borderRadius: '4px', border: '1px solid var(--border)', backgroundColor: 'var(--surface-0)', color: 'var(--text-primary)' }}
                           />
                         )}
                         {actionForm.mapping?.[key] && (
-                          <div style={{ flex: 1, padding: '8px', backgroundColor: 'var(--surface-1)', color: 'var(--text-secondary)', borderRadius: '4px', border: '1px solid var(--border)', fontStyle: 'italic', fontSize: '13px' }}>
+                          <div style={{ width: '100%', minWidth: 0, padding: '8px', backgroundColor: 'var(--surface-1)', color: 'var(--text-secondary)', borderRadius: '4px', border: '1px solid var(--border)', fontStyle: 'italic', fontSize: '13px' }}>
                             Mapped to {actionForm.mapping[key]}
                           </div>
                         )}
