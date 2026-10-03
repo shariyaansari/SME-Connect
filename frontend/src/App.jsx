@@ -324,6 +324,7 @@ export default function App() {
 
         {activeTab === 'templates' && (
           <TemplatesView
+            connections={connections}
             onNavigateWorkflows={() => setActiveTab('workflows')}
             onNavigateConnectors={() => setActiveTab('connected')}
           />

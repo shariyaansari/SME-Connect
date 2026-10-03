@@ -98,6 +98,7 @@ def create_workflow(
         organization_id=membership.organization_id,
         name=data.name.strip(),
         description=data.description.strip() if data.description else None,
+        template_id=data.template_id,
         status="draft",
         created_by=user_id,
         created_at=now,

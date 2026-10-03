@@ -82,6 +82,7 @@ class WorkflowCreateRequest(BaseModel):
     name: str = Field(min_length=2, max_length=150, description="Workflow name")
     description: str | None = Field(None, max_length=1000, description="Optional workflow description")
     definition: WorkflowDefinition = Field(..., description="Initial workflow definition")
+    template_id: int | None = Field(None, description="Optional source template ID")
 
 
 class WorkflowUpdateRequest(BaseModel):

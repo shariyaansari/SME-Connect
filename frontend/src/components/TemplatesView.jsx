@@ -35,7 +35,7 @@ const formatAppName = (slug) => {
   return slug.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
 };
 
-export default function TemplatesView({ onNavigateWorkflows, onNavigateConnectors }) {
+export default function TemplatesView({ connections, onNavigateWorkflows, onNavigateConnectors }) {
   const [templates, setTemplates] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedCategory, setSelectedCategory] = useState('All');
@@ -72,7 +72,10 @@ export default function TemplatesView({ onNavigateWorkflows, onNavigateConnector
   if (selectedTemplateId) {
     return (
       <TemplateDetailView 
-        templateId={selectedTemplateId} 
+        templateId={selectedTemplateId}
+        connections={connections}
+        onNavigateConnectors={onNavigateConnectors}
+        onNavigateWorkflows={onNavigateWorkflows}
         onBack={() => setSelectedTemplateId(null)} 
       />
     );

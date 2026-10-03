@@ -163,3 +163,32 @@ The seed set of templates for the MVP:
 - Template Versioning (tracking which version of a template a workflow was spawned from).
 - `created_from_template` boolean helper flag.
 - Community-contributed templates.
+
+## 13. Implementation Details (Phases 3A.1 to 3A.6)
+The implementation of the Template Library follows a strict multi-step wizard state machine in the frontend (`TemplateDetailView.jsx`) to ensure users are properly guided and constrained:
+
+1. **3A.6.1 (App Connection Check):**
+   - The UI intercepts the "Use This Template" click.
+   - It reads `template.app_slugs` and cross-references it with the user's active `connections`.
+   - If any required app is missing, the user is blocked from proceeding and offered a button to navigate to the Connected Apps configuration.
+   
+2. **3A.6.2 (Guided Setup Wizard):**
+   - Renders a dynamic form based entirely on the template's `setup_schema.fields`.
+   - Collects user inputs into a local `setupValues` state.
+   - Validates required fields before allowing the user to proceed.
+   - No hardcoded connector-specific fields exist in the UI layer.
+
+3. **3A.6.4 (Setup Review):**
+   - Provides a visual confirmation step (e.g. `Google Sheets → CRM`).
+   - Dynamically reads the `mappings` from the template definition and displays them (e.g. `Name → trigger.values.Name`).
+   - Acts as a trust-building step before creating the actual workflow entity.
+
+4. **3A.6.3 (Workflow Creation):**
+   - Deep-clones the template's `definition`.
+   - Injects the collected `setupValues` seamlessly into the `trigger.config`.
+   - Submits a `POST /workflows` request via the backend's `WorkflowCreateRequest` schema, which now inherently supports linking a `template_id`.
+
+5. **3A.6.5 (Template Activation):**
+   - Displays a success screen confirming that the Workflow has been drafted.
+   - Provides an immediate "Activate Workflow" call-to-action which hits the existing `POST /workflows/{id}/publish` endpoint to put the automation into a live state.
+   - Gracefully routes the user to the Workflows gallery to see their new automation.
