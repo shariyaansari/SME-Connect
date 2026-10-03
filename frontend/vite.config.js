@@ -10,7 +10,7 @@ export default defineConfig({
       '/auth': 'http://127.0.0.1:8000',
       '/organizations': 'http://127.0.0.1:8000',
       '/connectors': 'http://127.0.0.1:8000',
+      '/workflows': 'http://127.0.0.1:8000',
     },
   },
 })
-

@@ -45,8 +45,16 @@ class CustomAPIAdapter(BaseConnectorAdapter):
             "name": "Incoming Webhook",
             "description": "Fires whenever an external system posts a payload to this endpoint.",
             "payload_schema": {
-                "body": "object",
-                "headers": "object",
+                "body": {
+                    "type": "object",
+                    "label": "Payload Body",
+                    "description": "Parsed JSON webhook body payload",
+                },
+                "headers": {
+                    "type": "object",
+                    "label": "Headers",
+                    "description": "Incoming HTTP request headers",
+                },
             },
         }
     ]
@@ -57,9 +65,24 @@ class CustomAPIAdapter(BaseConnectorAdapter):
             "name": "Send HTTP Request",
             "description": "Sends a customizable GET, POST, PUT, or DELETE request.",
             "input_schema": {
-                "endpoint": "string",
-                "method": "string",
-                "data": "object",
+                "endpoint": {
+                    "type": "string",
+                    "label": "Endpoint URL / Path",
+                    "required": True,
+                    "description": "Target endpoint path or absolute URL",
+                },
+                "method": {
+                    "type": "string",
+                    "label": "HTTP Method",
+                    "required": True,
+                    "description": "HTTP request method (GET, POST, PUT, DELETE, PATCH)",
+                },
+                "data": {
+                    "type": "object",
+                    "label": "Request Body",
+                    "required": False,
+                    "description": "Optional JSON payload object",
+                },
             },
         }
     ]

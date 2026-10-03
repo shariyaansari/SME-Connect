@@ -1,3 +1,5 @@
+from typing import Any
+
 from app.modules.connectors.adapters.accounting import ZohoBooksAdapter
 from app.modules.connectors.adapters.base import BaseConnectorAdapter
 from app.modules.connectors.adapters.billing import StripeBillingAdapter

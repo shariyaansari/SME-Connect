@@ -58,38 +58,22 @@ export async function checkSession() {
 export const api = {
   // Connectors & Integrations (Module 2)
   fetchCatalog: () => request('/connectors/catalog'),
-  fetchConnections: (orgId) => request(
-    orgId ? `/connectors?organization_id=${orgId}` : '/connectors'
-  ),
-  fetchConnection: (id, orgId) => request(
-    orgId ? `/connectors/${id}?organization_id=${orgId}` : `/connectors/${id}`
-  ),
-  createConnection: (payload, orgId) => request(
-    orgId ? `/connectors?organization_id=${orgId}` : '/connectors',
-    {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    }
-  ),
-  testConnection: (id, orgId) => request(
-    orgId ? `/connectors/${id}/test?organization_id=${orgId}` : `/connectors/${id}/test`,
-    {
-      method: 'POST',
-    }
-  ),
-  updateConnection: (id, payload, orgId) => request(
-    orgId ? `/connectors/${id}?organization_id=${orgId}` : `/connectors/${id}`,
-    {
-      method: 'PUT',
-      body: JSON.stringify(payload),
-    }
-  ),
-  deleteConnection: (id, orgId) => request(
-    orgId ? `/connectors/${id}?organization_id=${orgId}` : `/connectors/${id}`,
-    {
-      method: 'DELETE',
-    }
-  ),
+  fetchConnections: () => request('/connectors'),
+  fetchConnection: (id) => request(`/connectors/${id}`),
+  createConnection: (payload) => request('/connectors', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }),
+  testConnection: (id) => request(`/connectors/${id}/test`, {
+    method: 'POST',
+  }),
+  updateConnection: (id, payload) => request(`/connectors/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  }),
+  deleteConnection: (id) => request(`/connectors/${id}`, {
+    method: 'DELETE',
+  }),
 
 
   // Organizations & Workspaces (Module 1)
@@ -153,4 +137,27 @@ export const api = {
   logout: () => {
     clearAuthToken();
   },
+
+  // Workflows (Module 3)
+  fetchWorkflows: (status) => request(status ? `/workflows?status=${status}` : '/workflows'),
+  fetchWorkflow: (id, version) => request(version ? `/workflows/${id}?version=${version}` : `/workflows/${id}`),
+  createWorkflow: (payload) => request('/workflows', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }),
+  updateWorkflow: (id, payload) => request(`/workflows/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  }),
+  deleteWorkflow: (id) => request(`/workflows/${id}`, {
+    method: 'DELETE',
+  }),
+  fetchWorkflowCapabilities: () => request('/workflows/capabilities'),
+  fetchWorkflowConnectorCapability: (slug) => request(`/workflows/capabilities/${slug}`),
+  publishWorkflow: (id) => request(`/workflows/${id}/publish`, {
+    method: 'POST',
+  }),
+  pauseWorkflow: (id) => request(`/workflows/${id}/pause`, {
+    method: 'POST',
+  }),
 };

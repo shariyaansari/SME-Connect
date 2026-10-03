@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.core.security import get_current_user
@@ -40,7 +40,6 @@ def get_connectors_catalog():
     response_model=list[ConnectionResponse],
 )
 def get_connections(
-    organization_id: int | None = Query(None, description="Optional organization ID"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -48,7 +47,6 @@ def get_connections(
         return list_connections(
             db=db,
             user_id=current_user.id,
-            organization_id=organization_id,
         )
     except ValueError as err:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(err))
@@ -60,7 +58,6 @@ def get_connections(
 )
 def get_connection_endpoint(
     connection_id: int,
-    organization_id: int | None = Query(None, description="Optional organization ID"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -69,7 +66,6 @@ def get_connection_endpoint(
             db=db,
             user_id=current_user.id,
             connection_id=connection_id,
-            organization_id=organization_id,
         )
     except ValueError as err:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(err))
@@ -82,7 +78,6 @@ def get_connection_endpoint(
 )
 def create_connection_endpoint(
     data: ConnectionCreateRequest,
-    organization_id: int | None = Query(None, description="Optional organization ID"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -91,7 +86,6 @@ def create_connection_endpoint(
             db=db,
             user_id=current_user.id,
             data=data,
-            organization_id=organization_id,
         )
     except PermissionError as err:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(err))
@@ -105,7 +99,6 @@ def create_connection_endpoint(
 )
 def test_connection_endpoint(
     connection_id: int,
-    organization_id: int | None = Query(None, description="Optional organization ID"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -114,7 +107,6 @@ def test_connection_endpoint(
             db=db,
             user_id=current_user.id,
             connection_id=connection_id,
-            organization_id=organization_id,
         )
     except PermissionError as err:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(err))
@@ -129,7 +121,6 @@ def test_connection_endpoint(
 def update_connection_endpoint(
     connection_id: int,
     data: ConnectionUpdateRequest,
-    organization_id: int | None = Query(None, description="Optional organization ID"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -139,7 +130,6 @@ def update_connection_endpoint(
             user_id=current_user.id,
             connection_id=connection_id,
             data=data,
-            organization_id=organization_id,
         )
     except PermissionError as err:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(err))
@@ -153,7 +143,6 @@ def update_connection_endpoint(
 )
 def delete_connection_endpoint(
     connection_id: int,
-    organization_id: int | None = Query(None, description="Optional organization ID"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -162,7 +151,6 @@ def delete_connection_endpoint(
             db=db,
             user_id=current_user.id,
             connection_id=connection_id,
-            organization_id=organization_id,
         )
     except PermissionError as err:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(err))

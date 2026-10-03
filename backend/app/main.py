@@ -6,6 +6,7 @@ from app.database import models  # noqa: F401
 from app.modules.auth.router import router as auth_router
 from app.modules.organizations.router import router as organization_router
 from app.modules.connectors.router import router as connectors_router
+from app.modules.workflows.router import router as workflows_router
 
 
 
@@ -27,6 +28,7 @@ app = FastAPI(
 app.include_router(auth_router)
 app.include_router(organization_router)
 app.include_router(connectors_router)
+app.include_router(workflows_router)
 
 
 

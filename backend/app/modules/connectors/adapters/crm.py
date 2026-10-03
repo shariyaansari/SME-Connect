@@ -46,11 +46,31 @@ class CRMAdapter(BaseConnectorAdapter):
             "name": "New Lead Created",
             "description": "Fires when a new contact or lead is created in the CRM.",
             "payload_schema": {
-                "lead_id": "string",
-                "name": "string",
-                "email": "string",
-                "phone": "string",
-                "status": "string",
+                "lead_id": {
+                    "type": "string",
+                    "label": "Lead ID",
+                    "description": "Unique CRM lead identifier",
+                },
+                "name": {
+                    "type": "string",
+                    "label": "Full Name",
+                    "description": "Contact or lead full name",
+                },
+                "email": {
+                    "type": "string",
+                    "label": "Email Address",
+                    "description": "Primary email",
+                },
+                "phone": {
+                    "type": "string",
+                    "label": "Phone Number",
+                    "description": "Primary phone",
+                },
+                "status": {
+                    "type": "string",
+                    "label": "Lead Status",
+                    "description": "Pipeline lead status",
+                },
             },
         },
         {
@@ -58,9 +78,21 @@ class CRMAdapter(BaseConnectorAdapter):
             "name": "Deal Stage Changed",
             "description": "Fires when a deal advances in the pipeline.",
             "payload_schema": {
-                "deal_id": "string",
-                "stage": "string",
-                "amount": "number",
+                "deal_id": {
+                    "type": "string",
+                    "label": "Deal ID",
+                    "description": "Unique CRM deal identifier",
+                },
+                "stage": {
+                    "type": "string",
+                    "label": "Pipeline Stage",
+                    "description": "Stage deal moved into",
+                },
+                "amount": {
+                    "type": "number",
+                    "label": "Deal Amount",
+                    "description": "Deal financial amount",
+                },
             },
         },
     ]
@@ -71,10 +103,30 @@ class CRMAdapter(BaseConnectorAdapter):
             "name": "Create Lead / Contact",
             "description": "Creates a new lead with customer details (name, email, phone, notes).",
             "input_schema": {
-                "name": "string",
-                "email": "string",
-                "phone": "string",
-                "company": "string",
+                "name": {
+                    "type": "string",
+                    "label": "Full Name",
+                    "required": True,
+                    "description": "Full name of the lead",
+                },
+                "email": {
+                    "type": "string",
+                    "label": "Email Address",
+                    "required": True,
+                    "description": "Primary email address",
+                },
+                "phone": {
+                    "type": "string",
+                    "label": "Phone Number",
+                    "required": False,
+                    "description": "Contact phone number",
+                },
+                "company": {
+                    "type": "string",
+                    "label": "Company Name",
+                    "required": False,
+                    "description": "Company or organization",
+                },
             },
         },
         {
@@ -82,8 +134,18 @@ class CRMAdapter(BaseConnectorAdapter):
             "name": "Update Lead",
             "description": "Updates fields of an existing lead by email or ID.",
             "input_schema": {
-                "email": "string",
-                "status": "string",
+                "email": {
+                    "type": "string",
+                    "label": "Email Address",
+                    "required": True,
+                    "description": "Email address of lead to update",
+                },
+                "status": {
+                    "type": "string",
+                    "label": "Lead Status",
+                    "required": True,
+                    "description": "New pipeline stage or status",
+                },
             },
         },
     ]

@@ -38,10 +38,26 @@ class StripeBillingAdapter(BaseConnectorAdapter):
             "name": "Payment Succeeded",
             "description": "Fires when a customer completes a successful payment charge.",
             "payload_schema": {
-                "charge_id": "string",
-                "amount": "number",
-                "customer_email": "string",
-                "currency": "string",
+                "charge_id": {
+                    "type": "string",
+                    "label": "Charge ID",
+                    "description": "Unique Stripe charge identifier",
+                },
+                "amount": {
+                    "type": "number",
+                    "label": "Charge Amount",
+                    "description": "Amount charged",
+                },
+                "customer_email": {
+                    "type": "string",
+                    "label": "Customer Email",
+                    "description": "Billing customer email address",
+                },
+                "currency": {
+                    "type": "string",
+                    "label": "Currency",
+                    "description": "Three-letter ISO currency code",
+                },
             },
         },
         {
@@ -49,9 +65,21 @@ class StripeBillingAdapter(BaseConnectorAdapter):
             "name": "Invoice Paid",
             "description": "Fires when an invoice transitions to paid status.",
             "payload_schema": {
-                "invoice_id": "string",
-                "amount_paid": "number",
-                "customer_id": "string",
+                "invoice_id": {
+                    "type": "string",
+                    "label": "Invoice ID",
+                    "description": "Unique Stripe invoice identifier",
+                },
+                "amount_paid": {
+                    "type": "number",
+                    "label": "Amount Paid",
+                    "description": "Total amount paid on invoice",
+                },
+                "customer_id": {
+                    "type": "string",
+                    "label": "Customer ID",
+                    "description": "Associated customer identifier",
+                },
             },
         },
     ]
@@ -62,8 +90,18 @@ class StripeBillingAdapter(BaseConnectorAdapter):
             "name": "Create Customer",
             "description": "Creates a customer profile in Stripe Billing with email and metadata.",
             "input_schema": {
-                "email": "string",
-                "name": "string",
+                "email": {
+                    "type": "string",
+                    "label": "Customer Email",
+                    "required": True,
+                    "description": "Customer primary email address",
+                },
+                "name": {
+                    "type": "string",
+                    "label": "Customer Name",
+                    "required": False,
+                    "description": "Customer full legal or business name",
+                },
             },
         },
         {
@@ -71,9 +109,24 @@ class StripeBillingAdapter(BaseConnectorAdapter):
             "name": "Create Draft Invoice",
             "description": "Generates a draft invoice item for a customer.",
             "input_schema": {
-                "customer_id": "string",
-                "amount": "number",
-                "description": "string",
+                "customer_id": {
+                    "type": "string",
+                    "label": "Customer ID",
+                    "required": True,
+                    "description": "Stripe customer identifier",
+                },
+                "amount": {
+                    "type": "number",
+                    "label": "Invoice Amount",
+                    "required": True,
+                    "description": "Monetary total for the invoice",
+                },
+                "description": {
+                    "type": "string",
+                    "label": "Line Item Description",
+                    "required": False,
+                    "description": "Summary of services or goods billed",
+                },
             },
         },
     ]

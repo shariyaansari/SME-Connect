@@ -376,3 +376,28 @@ def test_adapter_trigger_and_action_execution():
     assert lead_res["success"] is True
     assert lead_res["lead_id"] is not None
 
+
+def test_base_adapter_unimplemented_methods_raise_loudly():
+    from app.modules.connectors.adapters.whatsapp import WhatsAppAdapter
+    import pytest
+
+    wa = WhatsAppAdapter()
+    with pytest.raises(NotImplementedError) as exc_trigger:
+        wa.read_trigger_data("message_received", {}, {})
+    assert "Trigger 'message_received' is not implemented by connector 'whatsapp'" in str(exc_trigger.value)
+
+    with pytest.raises(NotImplementedError) as exc_action:
+        wa.execute_action("send_text", {}, {}, {})
+    assert "Action 'send_text' is not implemented by connector 'whatsapp'" in str(exc_action.value)
+
+
+def test_no_mutable_class_level_lists_on_base_adapter():
+    from app.modules.connectors.adapters.base import BaseConnectorAdapter
+
+    # Verify BaseConnectorAdapter does not assign mutable list defaults at class level
+    assert "config_fields" not in BaseConnectorAdapter.__dict__
+    assert "credential_fields" not in BaseConnectorAdapter.__dict__
+    assert "supported_triggers" not in BaseConnectorAdapter.__dict__
+    assert "supported_actions" not in BaseConnectorAdapter.__dict__
+
+

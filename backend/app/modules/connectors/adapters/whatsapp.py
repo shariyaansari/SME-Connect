@@ -44,10 +44,26 @@ class WhatsAppAdapter(BaseConnectorAdapter):
             "name": "New Customer Message",
             "description": "Fires when a customer sends an inquiry or message to your business number.",
             "payload_schema": {
-                "from_number": "string",
-                "customer_name": "string",
-                "message_text": "string",
-                "timestamp": "string",
+                "from_number": {
+                    "type": "string",
+                    "label": "From Phone Number",
+                    "description": "Sender phone number in E.164 format",
+                },
+                "customer_name": {
+                    "type": "string",
+                    "label": "Customer Name",
+                    "description": "Sender WhatsApp profile display name",
+                },
+                "message_text": {
+                    "type": "string",
+                    "label": "Message Content",
+                    "description": "Inbound text message body",
+                },
+                "timestamp": {
+                    "type": "string",
+                    "label": "Received At",
+                    "description": "ISO timestamp when message arrived",
+                },
             },
         }
     ]
@@ -58,9 +74,24 @@ class WhatsAppAdapter(BaseConnectorAdapter):
             "name": "Send Template Message",
             "description": "Sends a pre-approved template message (e.g. order confirmation, lead acknowledgement).",
             "input_schema": {
-                "to_number": "string",
-                "template_name": "string",
-                "parameters": "array",
+                "to_number": {
+                    "type": "string",
+                    "label": "Recipient Number",
+                    "required": True,
+                    "description": "Target phone number with country code",
+                },
+                "template_name": {
+                    "type": "string",
+                    "label": "Template Name",
+                    "required": True,
+                    "description": "Pre-approved Meta WhatsApp template name",
+                },
+                "parameters": {
+                    "type": "array",
+                    "label": "Template Parameters",
+                    "required": False,
+                    "description": "Ordered template placeholder variables",
+                },
             },
         },
         {
@@ -68,8 +99,18 @@ class WhatsAppAdapter(BaseConnectorAdapter):
             "name": "Send Freeform Message",
             "description": "Sends a standard text message within the active 24-hour customer service window.",
             "input_schema": {
-                "to_number": "string",
-                "text": "string",
+                "to_number": {
+                    "type": "string",
+                    "label": "Recipient Number",
+                    "required": True,
+                    "description": "Target phone number with country code",
+                },
+                "text": {
+                    "type": "string",
+                    "label": "Message Text",
+                    "required": True,
+                    "description": "Plain text message content",
+                },
             },
         },
     ]

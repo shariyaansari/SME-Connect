@@ -1,7 +1,9 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, JSON, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, JSON, String, Text, UniqueConstraint, event
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm.attributes import get_history
 
 from app.database.connection import Base
 
@@ -289,4 +291,134 @@ class AuditLog(Base):
 
     organization: Mapped["Organization"] = relationship("Organization", backref="audit_logs")
     user: Mapped["User"] = relationship("User", backref="audit_logs")
-
+
+class Workflow(Base):
+    __tablename__ = "workflows"
+
+    id: Mapped[int] = mapped_column(
+        primary_key=True,
+        index=True,
+    )
+
+    organization_id: Mapped[int] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    name: Mapped[str] = mapped_column(
+        String(150),
+        nullable=False,
+    )
+
+    description: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
+    status: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="draft",
+    )
+
+    created_by: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utc_now,
+        nullable=False,
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utc_now,
+        onupdate=utc_now,
+        nullable=False,
+    )
+
+    organization: Mapped["Organization"] = relationship("Organization", backref="workflows")
+    creator: Mapped["User"] = relationship("User", foreign_keys=[created_by], backref="created_workflows")
+    versions: Mapped[list["WorkflowVersion"]] = relationship(
+        "WorkflowVersion",
+        back_populates="workflow",
+        cascade="all, delete-orphan",
+        order_by="WorkflowVersion.version_number.desc()",
+    )
+
+
+class WorkflowVersion(Base):
+    __tablename__ = "workflow_versions"
+    __table_args__ = (
+        UniqueConstraint("workflow_id", "version_number", name="uq_workflow_version_number"),
+    )
+
+    id: Mapped[int] = mapped_column(
+        primary_key=True,
+        index=True,
+    )
+
+    workflow_id: Mapped[int] = mapped_column(
+        ForeignKey("workflows.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    version_number: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+
+    definition: Mapped[dict] = mapped_column(
+        JSON().with_variant(JSONB, "postgresql"),
+        nullable=False,
+        default=dict,
+    )
+
+    created_by: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utc_now,
+        nullable=False,
+    )
+
+    published_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    workflow: Mapped["Workflow"] = relationship("Workflow", back_populates="versions")
+    creator: Mapped["User"] = relationship("User", foreign_keys=[created_by], backref="created_workflow_versions")
+
+
+@event.listens_for(WorkflowVersion, "before_update")
+def check_workflow_version_immutability(mapper, connection, target):
+    """
+    Guarantees full immutability of published workflow versions at the database model level.
+    Once published_at is committed, definition, version_number, published_at, workflow_id,
+    and created_by can never be modified.
+    """
+    pub_history = get_history(target, "published_at")
+    was_already_published = bool(
+        (pub_history.unchanged and pub_history.unchanged[0] is not None)
+        or (pub_history.deleted and pub_history.deleted[0] is not None)
+    )
+
+    if was_already_published:
+        immutable_fields = ("definition", "version_number", "published_at", "workflow_id", "created_by")
+        for field_name in immutable_fields:
+            field_hist = get_history(target, field_name)
+            if field_hist.has_changes():
+                raise ValueError(
+                    f"Workflow version {target.version_number} is immutable because it has already been published. "
+                    f"Cannot modify '{field_name}'."
+                )

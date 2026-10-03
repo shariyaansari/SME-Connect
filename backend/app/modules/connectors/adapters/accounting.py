@@ -44,10 +44,26 @@ class ZohoBooksAdapter(BaseConnectorAdapter):
             "name": "New Invoice Created",
             "description": "Fires when a new tax invoice is generated.",
             "payload_schema": {
-                "invoice_number": "string",
-                "customer_name": "string",
-                "total": "number",
-                "currency": "string",
+                "invoice_number": {
+                    "type": "string",
+                    "label": "Invoice Number",
+                    "description": "Sequential tax invoice number",
+                },
+                "customer_name": {
+                    "type": "string",
+                    "label": "Customer Name",
+                    "description": "Client account or company name",
+                },
+                "total": {
+                    "type": "number",
+                    "label": "Total Amount",
+                    "description": "Invoice grand total amount",
+                },
+                "currency": {
+                    "type": "string",
+                    "label": "Currency",
+                    "description": "Invoice currency code (e.g. USD, INR)",
+                },
             },
         },
     ]
@@ -58,9 +74,24 @@ class ZohoBooksAdapter(BaseConnectorAdapter):
             "name": "Create Accounting Contact",
             "description": "Creates a customer or vendor ledger contact.",
             "input_schema": {
-                "contact_name": "string",
-                "email": "string",
-                "phone": "string",
+                "contact_name": {
+                    "type": "string",
+                    "label": "Contact Name",
+                    "required": True,
+                    "description": "Customer or vendor business name",
+                },
+                "email": {
+                    "type": "string",
+                    "label": "Email Address",
+                    "required": False,
+                    "description": "Primary accounting contact email",
+                },
+                "phone": {
+                    "type": "string",
+                    "label": "Phone Number",
+                    "required": False,
+                    "description": "Contact telephone number",
+                },
             },
         },
         {
@@ -68,10 +99,30 @@ class ZohoBooksAdapter(BaseConnectorAdapter):
             "name": "Create Tax Invoice",
             "description": "Generates a draft or sent tax invoice.",
             "input_schema": {
-                "customer_id": "string",
-                "item_name": "string",
-                "rate": "number",
-                "quantity": "number",
+                "customer_id": {
+                    "type": "string",
+                    "label": "Customer ID",
+                    "required": True,
+                    "description": "Zoho Books contact identifier",
+                },
+                "item_name": {
+                    "type": "string",
+                    "label": "Item Description",
+                    "required": True,
+                    "description": "Line item name or description",
+                },
+                "rate": {
+                    "type": "number",
+                    "label": "Unit Rate",
+                    "required": True,
+                    "description": "Price per unit",
+                },
+                "quantity": {
+                    "type": "number",
+                    "label": "Quantity",
+                    "required": True,
+                    "description": "Number of units billed",
+                },
             },
         },
     ]

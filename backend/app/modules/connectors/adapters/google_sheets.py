@@ -52,9 +52,21 @@ class GoogleSheetsAdapter(BaseConnectorAdapter):
             "name": "New Row Added",
             "description": "Fires immediately when a new row of data is added to the spreadsheet.",
             "payload_schema": {
-                "row_index": "number",
-                "values": "object",
-                "created_at": "string",
+                "row_index": {
+                    "type": "number",
+                    "label": "Row Index",
+                    "description": "1-based row index in spreadsheet",
+                },
+                "values": {
+                    "type": "object",
+                    "label": "Row Values",
+                    "description": "Key-value mapping of column headers to row cell values",
+                },
+                "created_at": {
+                    "type": "string",
+                    "label": "Created At",
+                    "description": "Timestamp when the row was detected",
+                },
             },
         }
     ]
@@ -65,7 +77,12 @@ class GoogleSheetsAdapter(BaseConnectorAdapter):
             "name": "Append Row",
             "description": "Appends mapped data as a new row to the specified sheet.",
             "input_schema": {
-                "values": "object",
+                "values": {
+                    "type": "object",
+                    "label": "Row Values",
+                    "required": True,
+                    "description": "Dictionary of column names to row values",
+                },
             },
         },
         {
@@ -73,7 +90,12 @@ class GoogleSheetsAdapter(BaseConnectorAdapter):
             "name": "Read Rows",
             "description": "Fetches recent rows matching a query or column condition.",
             "input_schema": {
-                "limit": "number",
+                "limit": {
+                    "type": "number",
+                    "label": "Row Limit",
+                    "required": False,
+                    "description": "Maximum number of rows to retrieve",
+                },
             },
         },
     ]
