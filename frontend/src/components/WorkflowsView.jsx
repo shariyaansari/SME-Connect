@@ -3,7 +3,8 @@ import {
   GitFork,
   CheckCircle,
   PauseCircle,
-  Plus
+  Plus,
+  Trash2
 } from 'lucide-react';
 import { api } from '../api';
 
@@ -15,6 +16,7 @@ export default function WorkflowsView({ onNavigateConnectors }) {
   // Builder State
   const [activeWorkflowId, setActiveWorkflowId] = useState(null);
   const [draftDefinition, setDraftDefinition] = useState(null);
+  const [validationResult, setValidationResult] = useState(null);
 
   // UI State
   const [showTriggerModal, setShowTriggerModal] = useState(false);
@@ -63,6 +65,7 @@ export default function WorkflowsView({ onNavigateConnectors }) {
       const detail = await api.fetchWorkflow(id);
       setActiveWorkflowId(id);
       setDraftDefinition(detail.definition);
+      setValidationResult(null);
     } catch (err) {
       console.error(err);
     }
@@ -85,12 +88,30 @@ export default function WorkflowsView({ onNavigateConnectors }) {
     }
   };
 
+  const handleDeleteWorkflow = async (id, e) => {
+    e.stopPropagation();
+    if (!confirm('Are you sure you want to delete this workflow and all its versions?')) return;
+    try {
+      await api.deleteWorkflow(id);
+      if (activeWorkflowId === id) {
+        setActiveWorkflowId(null);
+        setDraftDefinition(null);
+        setValidationResult(null);
+      }
+      await loadData();
+    } catch (err) {
+      console.error(err);
+      alert('Failed to delete workflow: ' + err.message);
+    }
+  };
+
   const handleNewWorkflow = () => {
     setActiveWorkflowId('new');
     setDraftDefinition({
       trigger: { connector: "", event: "", config: {} },
       steps: []
     });
+    setValidationResult(null);
     setTriggerForm({ connector: '', event: '' });
     setShowTriggerModal(true);
   };
@@ -118,8 +139,19 @@ export default function WorkflowsView({ onNavigateConnectors }) {
       try {
         const updated = await api.updateWorkflow(activeWorkflowId, { definition: newDef });
         setDraftDefinition(updated.definition);
+        setValidationResult({ valid: true });
         await loadData();
-      } catch (err) { console.error(err); }
+      } catch (err) {
+        console.error(err);
+        if (err.validationErrors) {
+          setValidationResult({ valid: false, errors: err.validationErrors });
+        } else {
+          setValidationResult({ valid: false, errors: err.message });
+        }
+        // Rollback on validation failure if we want to, but the UI keeps the newDef in draftDefinition, 
+        // which allows the user to see the errors and fix them in the canvas without losing work.
+        // Actually, draftDefinition is already set to newDef above.
+      }
     }
   };
 
@@ -156,13 +188,20 @@ export default function WorkflowsView({ onNavigateConnectors }) {
         setActiveWorkflowId(created.id);
         setDraftDefinition(created.definition);
         setWorkflows([created, ...workflows]);
+        setValidationResult({ valid: true });
       } else {
         const updated = await api.updateWorkflow(activeWorkflowId, { definition: newDef });
         setDraftDefinition(updated.definition);
+        setValidationResult({ valid: true });
         await loadData();
       }
     } catch (err) {
       console.error(err);
+      if (err.validationErrors) {
+        setValidationResult({ valid: false, errors: err.validationErrors });
+      } else {
+        setValidationResult({ valid: false, errors: err.message });
+      }
     }
   };
 
@@ -202,13 +241,20 @@ export default function WorkflowsView({ onNavigateConnectors }) {
         setActiveWorkflowId(created.id);
         setDraftDefinition(created.definition);
         setWorkflows([created, ...workflows]);
+        setValidationResult({ valid: true });
       } else {
         const updated = await api.updateWorkflow(activeWorkflowId, { definition: newDef });
         setDraftDefinition(updated.definition);
+        setValidationResult({ valid: true });
         await loadData();
       }
     } catch (err) {
       console.error(err);
+      if (err.validationErrors) {
+        setValidationResult({ valid: false, errors: err.validationErrors });
+      } else {
+        setValidationResult({ valid: false, errors: err.message });
+      }
     }
   };
 
@@ -250,6 +296,7 @@ export default function WorkflowsView({ onNavigateConnectors }) {
   };
 
   const activeCount = (workflows || []).filter((w) => w.status === 'active' || w.status === 'published').length;
+  const activeWorkflow = (workflows || []).find(w => w.id === activeWorkflowId);
 
   return (
     <div>
@@ -304,22 +351,129 @@ export default function WorkflowsView({ onNavigateConnectors }) {
       }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
           <div>
-            <h3>Workflow design canvas</h3>
-            <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '2px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <h3 style={{ margin: 0 }}>Workflow design canvas</h3>
+              {activeWorkflow && (
+                <span className={`status-pill ${activeWorkflow.status === 'published' ? 'success' : 'neutral'}`} style={{ transform: 'scale(0.85)', transformOrigin: 'left center' }}>
+                  {activeWorkflow.status === 'published' ? <CheckCircle size={12} /> : <PauseCircle size={12} />}
+                  <span>{activeWorkflow.status === 'published' ? 'Published' : activeWorkflow.status === 'draft' ? 'Draft' : 'Paused'}</span>
+                </span>
+              )}
+            </div>
+            <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px' }}>
               {activeWorkflowId
-                ? `Editing: ${(workflows || []).find(w => w.id === activeWorkflowId)?.name || 'New Workflow'}`
+                ? `Editing: ${activeWorkflow?.name || 'New Workflow'} (v${activeWorkflow?.version_number || 1})`
                 : 'Select a workflow from the inventory below to edit its flow.'}
             </p>
           </div>
 
-          <button
-            className="btn-secondary"
-            onClick={onNavigateConnectors}
-            style={{ fontSize: '12px', padding: '4px 10px' }}
-          >
-            Manage connections
-          </button>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            {activeWorkflow && activeWorkflow.status !== 'published' && (
+              <button
+                className="btn-primary"
+                onClick={async () => {
+                  try {
+                    await api.publishWorkflow(activeWorkflowId);
+                    setValidationResult(null);
+                    await loadData();
+                  } catch (err) {
+                    console.error(err);
+                    if (err.validationErrors) {
+                      setValidationResult({ valid: false, errors: err.validationErrors });
+                    } else {
+                      setValidationResult({ valid: false, errors: err.message });
+                    }
+                  }
+                }}
+                style={{ fontSize: '12px', padding: '4px 10px', backgroundColor: 'var(--success)' }}
+              >
+                Publish
+              </button>
+            )}
+            
+            {activeWorkflow && activeWorkflow.status === 'published' && (
+              <button
+                className="btn-secondary"
+                onClick={async () => {
+                  try {
+                    await api.pauseWorkflow(activeWorkflowId);
+                    setValidationResult(null);
+                    await loadData();
+                  } catch (err) {
+                    console.error(err);
+                    setValidationResult({ valid: false, errors: err.message });
+                  }
+                }}
+                style={{ fontSize: '12px', padding: '4px 10px' }}
+              >
+                Pause Workflow
+              </button>
+            )}
+
+            <button
+              className="btn-secondary"
+              onClick={async () => {
+                if (!activeWorkflowId || activeWorkflowId === 'new') return;
+                try {
+                  await api.updateWorkflow(activeWorkflowId, { definition: draftDefinition });
+                  setValidationResult({ valid: true });
+                } catch (err) {
+                  console.error(err);
+                  if (err.validationErrors) {
+                    setValidationResult({ valid: false, errors: err.validationErrors });
+                  } else {
+                    setValidationResult({ valid: false, errors: err.message });
+                  }
+                }
+              }}
+              style={{ fontSize: '12px', padding: '4px 10px' }}
+              disabled={!activeWorkflowId || activeWorkflowId === 'new'}
+            >
+              Validate
+            </button>
+            <button
+              className="btn-secondary"
+              onClick={onNavigateConnectors}
+              style={{ fontSize: '12px', padding: '4px 10px' }}
+            >
+              Manage connections
+            </button>
+          </div>
         </div>
+
+        {validationResult && (
+          <div style={{
+            marginBottom: '16px',
+            padding: '12px 16px',
+            borderRadius: '6px',
+            backgroundColor: validationResult.valid ? 'rgba(34, 197, 94, 0.1)' : 'rgba(239, 68, 68, 0.1)',
+            border: `1px solid ${validationResult.valid ? 'rgba(34, 197, 94, 0.2)' : 'rgba(239, 68, 68, 0.2)'}`,
+          }}>
+            {validationResult.valid ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--success)', fontSize: '14px', fontWeight: 500 }}>
+                <CheckCircle size={16} />
+                Workflow is valid
+              </div>
+            ) : (
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--error)', fontSize: '14px', fontWeight: 500, marginBottom: '8px' }}>
+                  <span style={{ fontSize: '16px' }}>&times;</span>
+                  Workflow has errors
+                </div>
+                <ul style={{ margin: 0, paddingLeft: '24px', color: 'var(--text-secondary)', fontSize: '13px' }}>
+                  {Array.isArray(validationResult.errors) ? validationResult.errors.map((err, i) => (
+                    <li key={i} style={{ marginBottom: '4px' }}>
+                      <span style={{ fontFamily: 'monospace', color: 'var(--text-primary)', marginRight: '6px' }}>{err.path || 'Workflow'}</span>
+                      &rarr; {err.message}
+                    </li>
+                  )) : (
+                    <li>{validationResult.errors}</li>
+                  )}
+                </ul>
+              </div>
+            )}
+          </div>
+        )}
 
         {activeWorkflowId && draftDefinition ? (
           <div style={{
@@ -565,6 +719,25 @@ export default function WorkflowsView({ onNavigateConnectors }) {
                     />
                     <span className="slider" />
                   </label>
+
+                  <button
+                    onClick={(e) => handleDeleteWorkflow(wf.id, e)}
+                    style={{
+                      background: 'transparent',
+                      border: 'none',
+                      cursor: 'pointer',
+                      color: 'var(--text-secondary)',
+                      padding: '4px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}
+                    title="Delete workflow"
+                    onMouseOver={(e) => e.currentTarget.style.color = 'var(--error)'}
+                    onMouseOut={(e) => e.currentTarget.style.color = 'var(--text-secondary)'}
+                  >
+                    <Trash2 size={16} />
+                  </button>
                 </div>
               </div>
             );
@@ -591,7 +764,11 @@ export default function WorkflowsView({ onNavigateConnectors }) {
 
             <div className="form-group">
               <label>App / Connector</label>
-              <select value={triggerForm.connector} onChange={(e) => setTriggerForm({ connector: e.target.value, event: '' })}>
+              <select 
+                value={triggerForm.connector} 
+                onChange={(e) => setTriggerForm({ connector: e.target.value, event: '' })}
+                style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid var(--border)', backgroundColor: 'var(--surface-0)', color: 'var(--text-primary)' }}
+              >
                 <option value="">Select a connector...</option>
                 {(capabilities || []).map(cap => (
                   <option key={cap.slug} value={cap.slug}>
@@ -604,7 +781,11 @@ export default function WorkflowsView({ onNavigateConnectors }) {
             {triggerForm.connector && (
               <div className="form-group" style={{ marginTop: '16px' }}>
                 <label>Event</label>
-                <select value={triggerForm.event} onChange={(e) => setTriggerForm({ ...triggerForm, event: e.target.value })}>
+                <select 
+                  value={triggerForm.event} 
+                  onChange={(e) => setTriggerForm({ ...triggerForm, event: e.target.value })}
+                  style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid var(--border)', backgroundColor: 'var(--surface-0)', color: 'var(--text-primary)' }}
+                >
                   <option value="">Select an event...</option>
                   {capabilities
                     .find(c => c.slug === triggerForm.connector)
@@ -648,7 +829,11 @@ export default function WorkflowsView({ onNavigateConnectors }) {
 
             <div className="form-group">
               <label>App / Connector</label>
-              <select value={actionForm.connector} onChange={(e) => setActionForm({ connector: e.target.value, action: '', config: {}, mapping: {} })}>
+              <select 
+                value={actionForm.connector} 
+                onChange={(e) => setActionForm({ connector: e.target.value, action: '', config: {}, mapping: {} })}
+                style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid var(--border)', backgroundColor: 'var(--surface-0)', color: 'var(--text-primary)' }}
+              >
                 <option value="">Select a connector...</option>
                 {(capabilities || []).map(cap => (
                   <option key={cap.slug} value={cap.slug} disabled={!cap.supported_actions || cap.supported_actions.length === 0}>
@@ -661,7 +846,11 @@ export default function WorkflowsView({ onNavigateConnectors }) {
             {actionForm.connector && (
               <div className="form-group" style={{ marginTop: '16px' }}>
                 <label>Action</label>
-                <select value={actionForm.action} onChange={(e) => setActionForm({ ...actionForm, action: e.target.value, config: {}, mapping: {} })}>
+                <select 
+                  value={actionForm.action} 
+                  onChange={(e) => setActionForm({ ...actionForm, action: e.target.value, config: {}, mapping: {} })}
+                  style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid var(--border)', backgroundColor: 'var(--surface-0)', color: 'var(--text-primary)' }}
+                >
                   <option value="">Select an action...</option>
                   {(capabilities.find(c => c.slug === actionForm.connector)?.supported_actions || []).map(a => (
                     <option key={a.slug} value={a.slug}>{a.name}</option>
@@ -726,6 +915,34 @@ export default function WorkflowsView({ onNavigateConnectors }) {
             })()}
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '24px' }}>
+              {editingStepId && editingStepId !== 'step-placeholder' && (
+                <button
+                  className="btn-secondary"
+                  style={{ marginRight: 'auto', color: 'var(--error)', borderColor: 'var(--error)' }}
+                  onClick={async () => {
+                    const newSteps = (draftDefinition.steps || []).filter(s => s.id !== editingStepId);
+                    const newDef = { ...draftDefinition, steps: newSteps };
+                    setDraftDefinition(newDef);
+                    setShowActionModal(false);
+                    setEditingStepId(null);
+                    setActionForm({ connector: '', action: '', config: {}, mapping: {} });
+                    if (activeWorkflowId !== 'new') {
+                      try {
+                        const updated = await api.updateWorkflow(activeWorkflowId, { definition: newDef });
+                        setDraftDefinition(updated.definition);
+                        setValidationResult({ valid: true });
+                        await loadData();
+                      } catch (err) {
+                        console.error(err);
+                        if (err.validationErrors) setValidationResult({ valid: false, errors: err.validationErrors });
+                        else setValidationResult({ valid: false, errors: err.message });
+                      }
+                    }
+                  }}
+                >
+                  Delete Action
+                </button>
+              )}
               <button className="btn-secondary" onClick={() => { setShowActionModal(false); setEditingStepId(null); setActionForm({ connector: '', action: '', config: {}, mapping: {} }); }}>Cancel</button>
               <button className="btn-primary" onClick={handleSaveAction} disabled={!actionForm.connector || !actionForm.action}>Save Action</button>
             </div>
@@ -793,6 +1010,34 @@ export default function WorkflowsView({ onNavigateConnectors }) {
             )}
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '24px' }}>
+              {editingStepId && editingStepId !== 'step-placeholder' && (
+                <button
+                  className="btn-secondary"
+                  style={{ marginRight: 'auto', color: 'var(--error)', borderColor: 'var(--error)' }}
+                  onClick={async () => {
+                    const newSteps = (draftDefinition.steps || []).filter(s => s.id !== editingStepId);
+                    const newDef = { ...draftDefinition, steps: newSteps };
+                    setDraftDefinition(newDef);
+                    setShowConditionModal(false);
+                    setEditingStepId(null);
+                    setConditionForm({ field: '', operator: 'equals', value: '' });
+                    if (activeWorkflowId !== 'new') {
+                      try {
+                        const updated = await api.updateWorkflow(activeWorkflowId, { definition: newDef });
+                        setDraftDefinition(updated.definition);
+                        setValidationResult({ valid: true });
+                        await loadData();
+                      } catch (err) {
+                        console.error(err);
+                        if (err.validationErrors) setValidationResult({ valid: false, errors: err.validationErrors });
+                        else setValidationResult({ valid: false, errors: err.message });
+                      }
+                    }
+                  }}
+                >
+                  Delete Condition
+                </button>
+              )}
               <button className="btn-secondary" onClick={() => { setShowConditionModal(false); setEditingStepId(null); setConditionForm({ field: '', operator: 'equals', value: '' }); }}>Cancel</button>
               <button className="btn-primary" onClick={handleSaveCondition} disabled={!conditionForm.field || !conditionForm.operator}>Save Condition</button>
             </div>

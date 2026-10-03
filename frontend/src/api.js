@@ -34,8 +34,12 @@ async function request(endpoint, options = {}) {
   const data = await response.json().catch(() => ({}));
 
   if (!response.ok) {
-    const errorMsg = data.detail || response.statusText || 'Request failed';
-    throw new Error(errorMsg);
+    let errorMsg = data.detail || response.statusText || 'Request failed';
+    const err = new Error(typeof errorMsg === 'string' ? errorMsg : 'Validation Error');
+    if (Array.isArray(data.detail)) {
+      err.validationErrors = data.detail;
+    }
+    throw err;
   }
 
   return data;
