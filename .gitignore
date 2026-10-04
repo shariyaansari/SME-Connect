@@ -152,5 +152,5 @@ dmypy.json
 # Cython debug symbols
 cython_debug/
 
-
+scratch
 # End of https://mrkandreev.name/snippets/gitignore-generator/#react,Python,FastAPI

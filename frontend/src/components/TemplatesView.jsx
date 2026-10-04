@@ -11,6 +11,7 @@ import {
   BookOpen
 } from 'lucide-react';
 import { api } from '../api';
+import OnboardingChecklist from './OnboardingChecklist';
 import TemplateDetailView from './TemplateDetailView';
 
 const categoryColors = {
@@ -83,6 +84,8 @@ export default function TemplatesView({ connections, onNavigateWorkflows, onNavi
 
   return (
     <div style={{ maxWidth: '1000px', margin: '0 auto', padding: '20px 0' }}>
+      
+
       
       {/* Hero Section */}
       <div style={{ 
@@ -195,6 +198,17 @@ export default function TemplatesView({ connections, onNavigateWorkflows, onNavi
         </div>
       </div>
 
+      <OnboardingChecklist 
+        connections={connections}
+        onNavigate={(tab) => {
+          if (tab === 'connected') onNavigateConnectors();
+          if (tab === 'workflows') onNavigateWorkflows();
+          if (tab === 'templates') {
+            document.getElementById('templates-section')?.scrollIntoView({ behavior: 'smooth' });
+          }
+        }}
+      />
+      
       {/* Templates Section */}
       <div id="templates-section">
         <h2 style={{ fontSize: '24px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '8px' }}>
