@@ -22,6 +22,10 @@ from app.modules.workflows.service import (
     publish_workflow,
     update_workflow,
 )
+from app.modules.workflows.health import (
+    WorkflowHealthResponse,
+    calculate_workflow_health,
+)
 from app.modules.workflows.validation import WorkflowValidationError
 
 router = APIRouter(
@@ -275,6 +279,33 @@ def pause_workflow_endpoint(
         )
     except PermissionError as err:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(err))
+    except ValueError as err:
+        if "not found" in str(err).lower():
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(err))
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(err))
+
+
+@router.get(
+    "/{workflow_id}/health",
+    response_model=WorkflowHealthResponse,
+)
+def get_workflow_health_endpoint(
+    workflow_id: int,
+    organization_id: int | None = Query(None, description="Optional target organization ID"),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Returns lightweight operational health and reliability status for a workflow (Module 6.7).
+    """
+    try:
+        from app.modules.workflows.service import _get_membership
+        membership = _get_membership(db, current_user.id, organization_id)
+        return calculate_workflow_health(
+            db=db,
+            workflow_id=workflow_id,
+            organization_id=membership.organization_id,
+        )
     except ValueError as err:
         if "not found" in str(err).lower():
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(err))

@@ -384,7 +384,11 @@ def publish_workflow(
     wf_def = validate_workflow_or_raise(target_version.definition)
 
     # 2. Check every referenced connector has an active connection in this organization
-    referenced_connectors: set[str] = {wf_def.trigger.connector}
+    referenced_connectors: set[str] = set()
+    is_sched_trigger = (wf_def.trigger.type == "schedule") or (wf_def.trigger.connector == "schedule")
+    if not is_sched_trigger and wf_def.trigger.connector:
+        referenced_connectors.add(wf_def.trigger.connector)
+
     for step in wf_def.steps:
         if getattr(step, "type", None) == "action" and hasattr(step, "connector"):
             referenced_connectors.add(step.connector)

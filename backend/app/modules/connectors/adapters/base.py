@@ -2,6 +2,29 @@ from abc import ABC, abstractmethod
 from typing import Any
 
 
+class ConnectorExecutionError(Exception):
+    """
+    Standard generic error contract for connector adapter executions (Module 6.9).
+    Translates provider-specific status codes and exceptions into structured categories.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        category: str = "connector_error",
+        retryable: bool = True,
+        provider_code: str | None = None,
+        retry_after_seconds: int | None = None,
+    ):
+        super().__init__(message)
+        self.message = message
+        self.category = category
+        self.failure_category = category
+        self.retryable = retryable
+        self.provider_code = provider_code
+        self.retry_after_seconds = retry_after_seconds
+
+
 class BaseConnectorAdapter(ABC):
     slug: str
     name: str

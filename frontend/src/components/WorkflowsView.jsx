@@ -5,7 +5,14 @@ import {
   PauseCircle,
   Plus,
   Trash2,
-  GripVertical
+  GripVertical,
+  Play,
+  Activity,
+  Calendar,
+  Clock,
+  AlertTriangle,
+  RotateCcw,
+  Info
 } from 'lucide-react';
 import {
   DndContext,
@@ -102,9 +109,94 @@ function SortableStepItem({ step, index, editingStepId, setEditingStepId, setCon
   );
 }
 
-export default function WorkflowsView({ onNavigateConnectors }) {
+function formatScheduleSummary(trigger) {
+  if (!trigger) return null;
+  const isSchedule = trigger.type === 'schedule' || trigger.connector === 'schedule';
+  if (!isSchedule) return null;
+
+  const cfg = trigger.config || {};
+  const freq = cfg.frequency || 'daily';
+  const tz = cfg.timezone || 'UTC';
+  const minute = String(cfg.minute ?? 0).padStart(2, '0');
+  const hour = String(cfg.hour ?? 0).padStart(2, '0');
+
+  if (freq === 'hourly') {
+    return `Hourly at :${minute} (${tz})`;
+  }
+  if (freq === 'daily') {
+    return `Daily at ${hour}:${minute} (${tz})`;
+  }
+  if (freq === 'weekly') {
+    const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const d = days[cfg.day_of_week ?? 1] || 'Mon';
+    return `Weekly on ${d} at ${hour}:${minute} (${tz})`;
+  }
+  return `Scheduled (${freq})`;
+}
+
+function renderHealthBadge(health) {
+  if (!health) return null;
+  const status = health.health_status;
+  let bg = 'var(--status-neutral-bg)';
+  let color = 'var(--status-neutral-text)';
+  let label = 'Unknown';
+  let icon = <Info size={11} />;
+
+  if (status === 'healthy') {
+    bg = 'var(--status-success-bg)';
+    color = 'var(--status-success-text)';
+    label = 'Healthy';
+    icon = <CheckCircle size={11} />;
+  } else if (status === 'needs_attention') {
+    bg = 'var(--status-warning-bg)';
+    color = 'var(--status-warning-text)';
+    label = 'Needs Attention';
+    icon = <AlertTriangle size={11} />;
+  } else if (status === 'retrying') {
+    bg = '#EEF2FF';
+    color = '#4338CA';
+    label = 'Retrying';
+    icon = <RotateCcw size={11} />;
+  } else if (status === 'paused') {
+    bg = 'var(--status-neutral-bg)';
+    color = 'var(--status-neutral-text)';
+    label = 'Paused';
+    icon = <PauseCircle size={11} />;
+  } else if (status === 'never_run') {
+    bg = 'var(--surface-3)';
+    color = 'var(--text-muted)';
+    label = 'Never Run';
+    icon = <Clock size={11} />;
+  }
+
+  const tooltip = `${health.health_title || 'Health Status'}: ${health.health_explanation || ''} (Recent failure rate: ${(health.recent_failure_rate * 100).toFixed(0)}%, Consecutive failures: ${health.consecutive_failures})`;
+
+  return (
+    <span
+      title={tooltip}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: '4px',
+        padding: '2px 8px',
+        borderRadius: '9999px',
+        fontSize: '11px',
+        fontWeight: 500,
+        backgroundColor: bg,
+        color: color,
+        cursor: 'help'
+      }}
+    >
+      {icon}
+      <span>{label}</span>
+    </span>
+  );
+}
+
+export default function WorkflowsView({ onNavigateConnectors, onNavigateExecutions }) {
   const [workflows, setWorkflows] = useState([]);
   const [capabilities, setCapabilities] = useState([]);
+  const [workflowHealthMap, setWorkflowHealthMap] = useState({});
   const [loading, setLoading] = useState(true);
 
   // Builder State
@@ -114,7 +206,11 @@ export default function WorkflowsView({ onNavigateConnectors }) {
 
   // UI State
   const [showTriggerModal, setShowTriggerModal] = useState(false);
-  const [triggerForm, setTriggerForm] = useState({ connector: '', event: '' });
+  const [triggerForm, setTriggerForm] = useState({
+    connector: '',
+    event: '',
+    config: { frequency: 'daily', minute: 0, hour: 9, day_of_week: 1, timezone: 'UTC' }
+  });
   const [showActionModal, setShowActionModal] = useState(false);
   const [actionForm, setActionForm] = useState({ connector: '', action: '', config: {}, mapping: {} });
   const [editingStepId, setEditingStepId] = useState(null);
@@ -177,8 +273,29 @@ export default function WorkflowsView({ onNavigateConnectors }) {
         api.fetchWorkflows(),
         api.fetchWorkflowCapabilities()
       ]);
-      setWorkflows(wfs);
-      setCapabilities(caps);
+      setWorkflows(wfs || []);
+      setCapabilities(caps || []);
+
+      // Load reliability health for workflows
+      try {
+        const healthEntries = await Promise.all(
+          (wfs || []).map(async (wf) => {
+            try {
+              const h = await api.fetchWorkflowHealth(wf.id);
+              return [wf.id, h];
+            } catch {
+              return [wf.id, null];
+            }
+          })
+        );
+        const hMap = {};
+        healthEntries.forEach(([id, h]) => {
+          if (h) hMap[id] = h;
+        });
+        setWorkflowHealthMap(hMap);
+      } catch {
+        // Silently continue if health fetch fails
+      }
     } catch (err) {
       console.error(err);
     } finally {
@@ -238,26 +355,49 @@ export default function WorkflowsView({ onNavigateConnectors }) {
       steps: []
     });
     setValidationResult(null);
-    setTriggerForm({ connector: '', event: '' });
+    setTriggerForm({
+      connector: '',
+      event: '',
+      config: { frequency: 'daily', minute: 0, hour: 9, day_of_week: 1, timezone: 'UTC' }
+    });
     setShowTriggerModal(true);
   };
 
   const openTriggerModal = () => {
+    const currentTrig = draftDefinition?.trigger || {};
+    const isSchedule = currentTrig.connector === 'schedule' || currentTrig.type === 'schedule';
     setTriggerForm({
-      connector: draftDefinition?.trigger?.connector || '',
-      event: draftDefinition?.trigger?.event || ''
+      connector: isSchedule ? 'schedule' : (currentTrig.connector || ''),
+      event: isSchedule ? 'scheduled' : (currentTrig.event || ''),
+      config: currentTrig.config || { frequency: 'daily', minute: 0, hour: 9, day_of_week: 1, timezone: 'UTC' }
     });
     setShowTriggerModal(true);
   };
 
   const handleSaveTrigger = async () => {
+    const isSchedule = triggerForm.connector === 'schedule';
+    const trigDef = isSchedule
+      ? {
+          type: 'schedule',
+          connector: 'schedule',
+          event: 'scheduled',
+          config: {
+            frequency: triggerForm.config?.frequency || 'daily',
+            minute: Number(triggerForm.config?.minute ?? 0),
+            ...(triggerForm.config?.frequency !== 'hourly' ? { hour: Number(triggerForm.config?.hour ?? 9) } : {}),
+            ...(triggerForm.config?.frequency === 'weekly' ? { day_of_week: Number(triggerForm.config?.day_of_week ?? 1) } : {}),
+            timezone: triggerForm.config?.timezone || 'UTC',
+          }
+        }
+      : {
+          connector: triggerForm.connector,
+          event: triggerForm.event,
+          config: triggerForm.config || {}
+        };
+
     const newDef = {
       ...draftDefinition,
-      trigger: {
-        connector: triggerForm.connector,
-        event: triggerForm.event,
-        config: {}
-      }
+      trigger: trigDef
     };
     setDraftDefinition(newDef);
     setShowTriggerModal(false);
@@ -528,22 +668,50 @@ export default function WorkflowsView({ onNavigateConnectors }) {
             )}
             
             {activeWorkflow && activeWorkflow.status === 'published' && (
-              <button
-                className="btn-secondary"
-                onClick={async () => {
-                  try {
-                    await api.pauseWorkflow(activeWorkflowId);
-                    setValidationResult(null);
-                    await loadData();
-                  } catch (err) {
-                    console.error(err);
-                    setValidationResult({ valid: false, errors: err.message });
-                  }
-                }}
-                style={{ fontSize: '12px', padding: '4px 10px' }}
-              >
-                Pause Workflow
-              </button>
+              <>
+                <button
+                  className="btn-primary"
+                  onClick={async () => {
+                    try {
+                      await api.triggerWorkflowRun(activeWorkflowId);
+                      if (onNavigateExecutions) onNavigateExecutions();
+                    } catch (err) {
+                      console.error(err);
+                      alert(err.message || 'Run failed');
+                    }
+                  }}
+                  style={{ fontSize: '12px', padding: '4px 10px', display: 'flex', alignItems: 'center', gap: '4px' }}
+                >
+                  <Play size={12} />
+                  <span>Run once</span>
+                </button>
+                <button
+                  className="btn-secondary"
+                  onClick={async () => {
+                    try {
+                      await api.pauseWorkflow(activeWorkflowId);
+                      setValidationResult(null);
+                      await loadData();
+                    } catch (err) {
+                      console.error(err);
+                      setValidationResult({ valid: false, errors: err.message });
+                    }
+                  }}
+                  style={{ fontSize: '12px', padding: '4px 10px' }}
+                >
+                  Pause Workflow
+                </button>
+                {onNavigateExecutions && (
+                  <button
+                    className="btn-secondary"
+                    onClick={onNavigateExecutions}
+                    style={{ fontSize: '12px', padding: '4px 10px', display: 'flex', alignItems: 'center', gap: '4px' }}
+                  >
+                    <Activity size={12} />
+                    <span>Executions</span>
+                  </button>
+                )}
+              </>
             )}
 
             <button
@@ -640,19 +808,30 @@ export default function WorkflowsView({ onNavigateConnectors }) {
             onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'var(--trigger-accent)'; e.currentTarget.style.transform = 'translateY(-2px)'; }}
             onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.transform = 'translateY(0)'; }}
             >
-              <span className="kicker-label kicker-trigger">TRIGGER</span>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span className="kicker-label kicker-trigger">TRIGGER</span>
+                {(draftDefinition?.trigger?.type === 'schedule' || draftDefinition?.trigger?.connector === 'schedule') && (
+                  <span style={{ fontSize: '11px', color: 'var(--primary-btn-bg)', display: 'flex', alignItems: 'center', gap: '3px', fontWeight: 500 }}>
+                    <Calendar size={11} /> Scheduled
+                  </span>
+                )}
+              </div>
               <span style={{
                 fontSize: '14px',
                 fontWeight: 600,
                 color: 'var(--text-primary)',
               }}>
-                {draftDefinition?.trigger?.event ? getEventName(draftDefinition?.trigger?.connector, draftDefinition?.trigger?.event) : 'Unconfigured Trigger'}
+                {(draftDefinition?.trigger?.type === 'schedule' || draftDefinition?.trigger?.connector === 'schedule')
+                  ? `Runs ${draftDefinition.trigger.config?.frequency ? draftDefinition.trigger.config.frequency.charAt(0).toUpperCase() + draftDefinition.trigger.config.frequency.slice(1) : 'Daily'}`
+                  : draftDefinition?.trigger?.event ? getEventName(draftDefinition?.trigger?.connector, draftDefinition?.trigger?.event) : 'Unconfigured Trigger'}
               </span>
               <span style={{
                 fontSize: '12px',
                 color: 'var(--text-secondary)',
               }}>
-                {draftDefinition?.trigger?.connector ? getConnectorName(draftDefinition?.trigger?.connector) : 'Click to configure'}
+                {(draftDefinition?.trigger?.type === 'schedule' || draftDefinition?.trigger?.connector === 'schedule')
+                  ? formatScheduleSummary(draftDefinition.trigger)
+                  : draftDefinition?.trigger?.connector ? getConnectorName(draftDefinition?.trigger?.connector) : 'Click to configure'}
               </span>
             </div>
 
@@ -818,13 +997,31 @@ export default function WorkflowsView({ onNavigateConnectors }) {
                       whiteSpace: 'nowrap',
                       overflow: 'hidden',
                       textOverflow: 'ellipsis',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      marginTop: '2px',
                     }}>
-                      v{wf.version_number} &bull; {new Date(wf.created_at).toLocaleDateString()}
+                      <span>v{wf.version_number} &bull; {new Date(wf.created_at).toLocaleDateString()}</span>
+                      {formatScheduleSummary(wf.definition?.trigger) && (
+                        <span style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '3px',
+                          color: 'var(--primary-btn-bg)',
+                          fontWeight: 500,
+                          fontSize: '11px',
+                        }}>
+                          <Calendar size={11} /> {formatScheduleSummary(wf.definition?.trigger)}
+                        </span>
+                      )}
                     </div>
                   </div>
                 </div>
 
-                <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexShrink: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexShrink: 0 }}>
+                  {renderHealthBadge(workflowHealthMap[wf.id])}
+
                   <span className={`status-pill ${isActive ? 'success' : 'neutral'}`}>
                     {isActive ? <CheckCircle size={12} /> : <PauseCircle size={12} />}
                     <span>{isActive ? 'Active' : (wf.status === 'draft' ? 'Draft' : 'Paused')}</span>
@@ -888,22 +1085,137 @@ export default function WorkflowsView({ onNavigateConnectors }) {
             </p>
 
             <div className="form-group">
-              <label>App / Connector</label>
+              <label>Trigger Type / Connector</label>
               <select 
                 value={triggerForm.connector} 
-                onChange={(e) => setTriggerForm({ connector: e.target.value, event: '' })}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  if (val === 'schedule') {
+                    setTriggerForm({
+                      connector: 'schedule',
+                      event: 'scheduled',
+                      config: { frequency: 'daily', minute: 0, hour: 9, day_of_week: 1, timezone: 'UTC' }
+                    });
+                  } else {
+                    setTriggerForm({ connector: val, event: '', config: {} });
+                  }
+                }}
                 style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid var(--border)', backgroundColor: 'var(--surface-0)', color: 'var(--text-primary)' }}
               >
-                <option value="">Select a connector...</option>
-                {(capabilities || []).map(cap => (
-                  <option key={cap.slug} value={cap.slug}>
-                    {cap.name} {cap.is_connected ? '' : '(Connect required)'}
-                  </option>
-                ))}
+                <option value="">Select a trigger source...</option>
+                <optgroup label="Automation Timers">
+                  <option value="schedule">⏱ Scheduled Timer (Daily, Hourly, Weekly)</option>
+                </optgroup>
+                <optgroup label="Connected Apps">
+                  {(capabilities || []).map(cap => (
+                    <option key={cap.slug} value={cap.slug}>
+                      {cap.name} {cap.is_connected ? '' : '(Connect required)'}
+                    </option>
+                  ))}
+                </optgroup>
               </select>
             </div>
 
-            {triggerForm.connector && (
+            {/* Schedule Configuration */}
+            {triggerForm.connector === 'schedule' && (
+              <div style={{ marginTop: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <div className="form-group">
+                  <label>Frequency</label>
+                  <select
+                    value={triggerForm.config?.frequency || 'daily'}
+                    onChange={(e) => setTriggerForm({
+                      ...triggerForm,
+                      config: { ...triggerForm.config, frequency: e.target.value }
+                    })}
+                    style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid var(--border)', backgroundColor: 'var(--surface-0)', color: 'var(--text-primary)' }}
+                  >
+                    <option value="hourly">Hourly</option>
+                    <option value="daily">Daily</option>
+                    <option value="weekly">Weekly</option>
+                  </select>
+                </div>
+
+                {triggerForm.config?.frequency === 'weekly' && (
+                  <div className="form-group">
+                    <label>Day of Week</label>
+                    <select
+                      value={triggerForm.config?.day_of_week ?? 1}
+                      onChange={(e) => setTriggerForm({
+                        ...triggerForm,
+                        config: { ...triggerForm.config, day_of_week: Number(e.target.value) }
+                      })}
+                      style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid var(--border)', backgroundColor: 'var(--surface-0)', color: 'var(--text-primary)' }}
+                    >
+                      <option value={1}>Monday</option>
+                      <option value={2}>Tuesday</option>
+                      <option value={3}>Wednesday</option>
+                      <option value={4}>Thursday</option>
+                      <option value={5}>Friday</option>
+                      <option value={6}>Saturday</option>
+                      <option value={0}>Sunday</option>
+                    </select>
+                  </div>
+                )}
+
+                {triggerForm.config?.frequency !== 'hourly' && (
+                  <div className="form-group">
+                    <label>Hour (0-23 UTC)</label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={23}
+                      value={triggerForm.config?.hour ?? 9}
+                      onChange={(e) => setTriggerForm({
+                        ...triggerForm,
+                        config: { ...triggerForm.config, hour: Number(e.target.value) }
+                      })}
+                      style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid var(--border)', backgroundColor: 'var(--surface-0)', color: 'var(--text-primary)' }}
+                    />
+                  </div>
+                )}
+
+                <div className="form-group">
+                  <label>Minute (0-59)</label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={59}
+                    value={triggerForm.config?.minute ?? 0}
+                    onChange={(e) => setTriggerForm({
+                      ...triggerForm,
+                      config: { ...triggerForm.config, minute: Number(e.target.value) }
+                    })}
+                    style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid var(--border)', backgroundColor: 'var(--surface-0)', color: 'var(--text-primary)' }}
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label>Timezone (IANA)</label>
+                  <select
+                    value={triggerForm.config?.timezone || 'UTC'}
+                    onChange={(e) => setTriggerForm({
+                      ...triggerForm,
+                      config: { ...triggerForm.config, timezone: e.target.value }
+                    })}
+                    style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid var(--border)', backgroundColor: 'var(--surface-0)', color: 'var(--text-primary)' }}
+                  >
+                    <option value="UTC">UTC (Coordinated Universal Time)</option>
+                    <option value="America/New_York">America/New_York (Eastern)</option>
+                    <option value="America/Chicago">America/Chicago (Central)</option>
+                    <option value="America/Denver">America/Denver (Mountain)</option>
+                    <option value="America/Los_Angeles">America/Los_Angeles (Pacific)</option>
+                    <option value="Europe/London">Europe/London (GMT/BST)</option>
+                    <option value="Europe/Paris">Europe/Paris (CET)</option>
+                    <option value="Asia/Kolkata">Asia/Kolkata (IST)</option>
+                    <option value="Asia/Singapore">Asia/Singapore (SGT)</option>
+                    <option value="Asia/Tokyo">Asia/Tokyo (JST)</option>
+                  </select>
+                </div>
+              </div>
+            )}
+
+            {/* Standard Connector Trigger Event */}
+            {triggerForm.connector && triggerForm.connector !== 'schedule' && (
               <div className="form-group" style={{ marginTop: '16px' }}>
                 <label>Event</label>
                 <select 
@@ -928,7 +1240,13 @@ export default function WorkflowsView({ onNavigateConnectors }) {
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '24px' }}>
               <button className="btn-secondary" onClick={() => setShowTriggerModal(false)}>Cancel</button>
-              <button className="btn-primary" onClick={handleSaveTrigger} disabled={!triggerForm.connector || !triggerForm.event}>Save</button>
+              <button
+                className="btn-primary"
+                onClick={handleSaveTrigger}
+                disabled={!triggerForm.connector || (!triggerForm.event && triggerForm.connector !== 'schedule')}
+              >
+                Save Trigger
+              </button>
             </div>
           </div>
         </div>

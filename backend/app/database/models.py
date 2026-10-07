@@ -458,24 +458,24 @@ class Template(Base):
     )
 
     industry_tags: Mapped[list[str]] = mapped_column(
-        JSONB,
+        JSON().with_variant(JSONB, "postgresql"),
         nullable=False,
         default=list,
     )
 
     app_slugs: Mapped[list[str]] = mapped_column(
-        JSONB,
+        JSON().with_variant(JSONB, "postgresql"),
         nullable=False,
         default=list,
     )
 
     definition: Mapped[dict] = mapped_column(
-        JSONB,
+        JSON().with_variant(JSONB, "postgresql"),
         nullable=False,
     )
 
     setup_schema: Mapped[dict] = mapped_column(
-        JSONB,
+        JSON().with_variant(JSONB, "postgresql"),
         nullable=False,
     )
 
@@ -497,3 +497,290 @@ class Template(Base):
         onupdate=utc_now,
         nullable=False,
     )
+
+
+class WorkflowExecution(Base):
+    __tablename__ = "workflow_executions"
+
+    id: Mapped[int] = mapped_column(
+        primary_key=True,
+        index=True,
+    )
+
+    workflow_id: Mapped[int] = mapped_column(
+        ForeignKey("workflows.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    workflow_version_id: Mapped[int] = mapped_column(
+        ForeignKey("workflow_versions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    organization_id: Mapped[int] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    status: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="pending",
+        index=True,
+    )
+
+    trigger_data: Mapped[dict] = mapped_column(
+        JSON().with_variant(JSONB, "postgresql"),
+        nullable=False,
+        default=dict,
+    )
+
+    started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    error_message: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
+    attempt_number: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=1,
+    )
+
+    retry_of_execution_id: Mapped[int | None] = mapped_column(
+        ForeignKey("workflow_executions.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    retry_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+    )
+
+    next_retry_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        index=True,
+    )
+
+    failure_category: Mapped[str | None] = mapped_column(
+        String(50),
+        nullable=True,
+        index=True,
+    )
+
+    last_error_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utc_now,
+        nullable=False,
+    )
+
+    workflow: Mapped["Workflow"] = relationship("Workflow", backref="executions")
+    workflow_version: Mapped["WorkflowVersion"] = relationship("WorkflowVersion", backref="executions")
+    organization: Mapped["Organization"] = relationship("Organization", backref="workflow_executions")
+    retry_of: Mapped["WorkflowExecution | None"] = relationship(
+        "WorkflowExecution",
+        remote_side=[id],
+        backref="retries",
+        foreign_keys=[retry_of_execution_id],
+    )
+    step_executions: Mapped[list["WorkflowStepExecution"]] = relationship(
+        "WorkflowStepExecution",
+        back_populates="execution",
+        cascade="all, delete-orphan",
+        order_by="WorkflowStepExecution.step_index.asc()",
+    )
+
+
+class WorkflowStepExecution(Base):
+    __tablename__ = "workflow_step_executions"
+
+    id: Mapped[int] = mapped_column(
+        primary_key=True,
+        index=True,
+    )
+
+    execution_id: Mapped[int] = mapped_column(
+        ForeignKey("workflow_executions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    step_id: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+        index=True,
+    )
+
+    step_index: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+
+    status: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="pending",
+        index=True,
+    )
+
+    failure_category: Mapped[str | None] = mapped_column(
+        String(50),
+        nullable=True,
+    )
+
+    input_data: Mapped[dict] = mapped_column(
+        JSON().with_variant(JSONB, "postgresql"),
+        nullable=False,
+        default=dict,
+    )
+
+    output_data: Mapped[dict] = mapped_column(
+        JSON().with_variant(JSONB, "postgresql"),
+        nullable=False,
+        default=dict,
+    )
+
+    error_message: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
+    started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utc_now,
+        nullable=False,
+    )
+
+    execution: Mapped["WorkflowExecution"] = relationship("WorkflowExecution", back_populates="step_executions")
+
+
+class WorkflowTriggerState(Base):
+    __tablename__ = "workflow_trigger_states"
+
+    id: Mapped[int] = mapped_column(
+        primary_key=True,
+        index=True,
+    )
+
+    workflow_id: Mapped[int] = mapped_column(
+        ForeignKey("workflows.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+
+    workflow_version_id: Mapped[int] = mapped_column(
+        ForeignKey("workflow_versions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    cursor: Mapped[dict | None] = mapped_column(
+        JSON().with_variant(JSONB, "postgresql"),
+        nullable=True,
+        default=dict,
+    )
+
+    last_processed_event_key: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+
+    last_polled_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utc_now,
+        nullable=False,
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utc_now,
+        onupdate=utc_now,
+        nullable=False,
+    )
+
+    workflow: Mapped["Workflow"] = relationship("Workflow", backref="trigger_state")
+    workflow_version: Mapped["WorkflowVersion"] = relationship("WorkflowVersion")
+
+
+class WorkflowTriggerEvent(Base):
+    __tablename__ = "workflow_trigger_events"
+
+    id: Mapped[int] = mapped_column(
+        primary_key=True,
+        index=True,
+    )
+
+    workflow_id: Mapped[int] = mapped_column(
+        ForeignKey("workflows.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    organization_id: Mapped[int] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    event_key: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+        index=True,
+    )
+
+    execution_id: Mapped[int | None] = mapped_column(
+        ForeignKey("workflow_executions.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utc_now,
+        nullable=False,
+    )
+
+    __table_args__ = (
+        UniqueConstraint("workflow_id", "event_key", name="uq_workflow_event_key"),
+    )
+
+    workflow: Mapped["Workflow"] = relationship("Workflow", backref="trigger_events")
+    execution: Mapped["WorkflowExecution | None"] = relationship("WorkflowExecution", backref="trigger_event")
+
+

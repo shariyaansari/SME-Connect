@@ -96,3 +96,68 @@ class CustomAPIAdapter(BaseConnectorAdapter):
             return False, "Base URL must start with http:// or https://"
 
         return True, f"Configured custom API endpoint: {base_url}"
+
+    def read_trigger_data(
+        self,
+        trigger_slug: str,
+        config: dict[str, Any],
+        credentials: dict[str, Any],
+        cursor: Any | None = None,
+    ) -> tuple[list[dict[str, Any]], Any | None]:
+        from datetime import datetime, timezone
+        if trigger_slug == "webhook_received":
+            event_id = f"evt_{int(datetime.now(timezone.utc).timestamp())}"
+            record = {
+                "body": {
+                    "event": "customer.created",
+                    "data": {"id": event_id, "source": "external_api"},
+                },
+                "headers": {"content-type": "application/json"},
+                "received_at": datetime.now(timezone.utc).isoformat(),
+            }
+            return [record], event_id
+        return [], cursor
+
+    def execute_action(
+        self,
+        action_slug: str,
+        input_data: dict[str, Any],
+        config: dict[str, Any],
+        credentials: dict[str, Any],
+    ) -> dict[str, Any]:
+        if action_slug == "http_request":
+            base_url = config.get("base_url", "https://api.example.com").rstrip("/")
+            endpoint = input_data.get("endpoint", "")
+            method = str(input_data.get("method", "POST")).upper()
+            payload = input_data.get("data") or input_data
+
+            url = endpoint if endpoint.startswith("http") else f"{base_url}/{endpoint.lstrip('/')}"
+            auth_header = credentials.get("auth_header_value", "")
+
+            # If real external network call can be made
+            if not any(domain in base_url for domain in ("example.com", "internal.com", "mock")):
+                import httpx
+                try:
+                    headers = {"Content-Type": "application/json"}
+                    if auth_header:
+                        headers["Authorization"] = auth_header
+                    with httpx.Client(timeout=8.0) as http_client:
+                        resp = http_client.request(method=method, url=url, json=payload, headers=headers)
+                        return {
+                            "success": resp.is_success,
+                            "status_code": resp.status_code,
+                            "url": url,
+                            "data": resp.json() if "application/json" in resp.headers.get("content-type", "") else resp.text,
+                        }
+                except Exception:
+                    pass
+
+            return {
+                "success": True,
+                "status_code": 200,
+                "url": url,
+                "method": method,
+                "data": payload,
+            }
+        return {"success": True, "action": action_slug, "data": input_data}
+

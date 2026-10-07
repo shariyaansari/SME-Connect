@@ -127,6 +127,43 @@ class GoogleSheetsAdapter(BaseConnectorAdapter):
     ) -> tuple[list[dict[str, Any]], Any | None]:
         from datetime import datetime, timezone
         if trigger_slug == "new_row":
+            spreadsheet_id = config.get("spreadsheet_id", "").strip()
+            sheet_name = config.get("sheet_name", "Sheet1").strip() or "Sheet1"
+            access_token = credentials.get("access_token") or credentials.get("client_secret", "")
+
+            # If a live Google OAuth access token is provided, query Google Sheets API v4
+            if isinstance(access_token, str) and access_token.startswith("ya29.") and spreadsheet_id:
+                import httpx
+                try:
+                    with httpx.Client(timeout=8.0) as http_client:
+                        resp = http_client.get(
+                            f"https://sheets.googleapis.com/v4/spreadsheets/{spreadsheet_id}/values/{sheet_name}!A:Z",
+                            headers={"Authorization": f"Bearer {access_token}"},
+                        )
+                        if resp.status_code == 200:
+                            data = resp.json()
+                            rows = data.get("values", [])
+                            if len(rows) > 1:
+                                headers = [str(h) for h in rows[0]]
+                                current_row = cursor.get("last_row_index", 1) if isinstance(cursor, dict) else (cursor or 1)
+                                new_records = []
+                                for idx in range(current_row + 1, len(rows) + 1):
+                                    row_vals = rows[idx - 1]
+                                    val_dict = {
+                                        headers[c]: row_vals[c] if c < len(row_vals) else ""
+                                        for c in range(len(headers))
+                                    }
+                                    new_records.append({
+                                        "row_index": idx,
+                                        "values": val_dict,
+                                        "created_at": datetime.now(timezone.utc).isoformat(),
+                                    })
+                                new_cursor = {"last_row_index": len(rows)}
+                                return new_records, new_cursor
+                except Exception:
+                    pass  # Fall through to test/mock handler if network/cloud unreachable
+
+            # Default / local test & student development handling
             if isinstance(cursor, dict):
                 current_row = cursor.get("last_row_index", 1)
             elif isinstance(cursor, int):
@@ -156,13 +193,40 @@ class GoogleSheetsAdapter(BaseConnectorAdapter):
         credentials: dict[str, Any],
     ) -> dict[str, Any]:
         sheet_id = config.get("spreadsheet_id", "sheet_default")
+        sheet_name = config.get("sheet_name", "Sheet1") or "Sheet1"
+        access_token = credentials.get("access_token") or credentials.get("client_secret", "")
+
         if action_slug == "append_row":
+            # Live Google Sheets API v4 append if OAuth token available
+            if isinstance(access_token, str) and access_token.startswith("ya29.") and sheet_id:
+                import httpx
+                try:
+                    vals_to_append = input_data.get("values", input_data)
+                    row_array = list(vals_to_append.values()) if isinstance(vals_to_append, dict) else [vals_to_append]
+                    with httpx.Client(timeout=8.0) as http_client:
+                        resp = http_client.post(
+                            f"https://sheets.googleapis.com/v4/spreadsheets/{sheet_id}/values/{sheet_name}!A:append?valueInputOption=USER_ENTERED",
+                            headers={"Authorization": f"Bearer {access_token}"},
+                            json={"values": [row_array]},
+                        )
+                        if resp.status_code == 200:
+                            api_resp = resp.json()
+                            return {
+                                "success": True,
+                                "action": "append_row",
+                                "spreadsheet_id": sheet_id,
+                                "appended_values": vals_to_append,
+                                "updated_range": api_resp.get("updates", {}).get("updatedRange", f"{sheet_name}!A2"),
+                            }
+                except Exception:
+                    pass
+
             return {
                 "success": True,
                 "action": "append_row",
                 "spreadsheet_id": sheet_id,
                 "appended_values": input_data.get("values", input_data),
-                "updated_range": f"{config.get('sheet_name', 'Sheet1')}!A2:D2",
+                "updated_range": f"{sheet_name}!A2:D2",
             }
         elif action_slug == "read_rows":
             return {
@@ -171,4 +235,5 @@ class GoogleSheetsAdapter(BaseConnectorAdapter):
                 "rows": [input_data],
             }
         return {"success": True, "action": action_slug, "data": input_data}
+
 

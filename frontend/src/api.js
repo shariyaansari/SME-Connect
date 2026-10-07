@@ -168,4 +168,49 @@ export const api = {
   // Templates (Module 3A)
   fetchTemplates: () => request('/templates/'),
   fetchTemplate: (id) => request(`/templates/${id}`),
+
+  // Executions (Module 5)
+  fetchExecutions: (filters = {}, orgId) => {
+    const params = new URLSearchParams();
+    if (filters.workflow_id) params.append('workflow_id', filters.workflow_id);
+    if (filters.status) params.append('status', filters.status);
+    if (filters.from_date) params.append('from_date', filters.from_date);
+    if (filters.to_date) params.append('to_date', filters.to_date);
+    if (filters.limit) params.append('limit', filters.limit);
+    if (filters.offset) params.append('offset', filters.offset);
+    if (orgId) params.append('organization_id', orgId);
+    const qs = params.toString();
+    return request(qs ? `/executions?${qs}` : '/executions');
+  },
+  fetchExecutionDetail: (id, orgId) => request(
+    orgId ? `/executions/${id}?organization_id=${orgId}` : `/executions/${id}`
+  ),
+  triggerWorkflowRun: (workflowId, triggerData, orgId) => request(
+    orgId ? `/executions/run/${workflowId}?organization_id=${orgId}` : `/executions/run/${workflowId}`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ trigger_data: triggerData || {} }),
+    }
+  ),
+  runPollCycle: (orgId) => request(
+    orgId ? `/executions/poll-cycle?organization_id=${orgId}` : '/executions/poll-cycle',
+    {
+      method: 'POST',
+    }
+  ),
+  runScheduleCycle: (orgId) => request(
+    orgId ? `/executions/schedule-cycle?organization_id=${orgId}` : '/executions/schedule-cycle',
+    {
+      method: 'POST',
+    }
+  ),
+  retryExecution: (id, orgId) => request(
+    orgId ? `/executions/${id}/retry?organization_id=${orgId}` : `/executions/${id}/retry`,
+    {
+      method: 'POST',
+    }
+  ),
+  fetchWorkflowHealth: (id, orgId) => request(
+    orgId ? `/workflows/${id}/health?organization_id=${orgId}` : `/workflows/${id}/health`
+  ),
 };

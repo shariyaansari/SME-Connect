@@ -1,5 +1,6 @@
 import re
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import ValidationError
 
@@ -14,6 +15,124 @@ from app.modules.workflows.schemas import (
 )
 
 STEP_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_\-]+$")
+VALID_SCHEDULE_FREQUENCIES = {"hourly", "daily", "weekly"}
+VALID_DAYS_OF_WEEK = {
+    "monday",
+    "tuesday",
+    "wednesday",
+    "thursday",
+    "friday",
+    "saturday",
+    "sunday",
+}
+
+
+def validate_schedule_config(config: dict[str, Any]) -> list[ValidationErrorItem]:
+    errs: list[ValidationErrorItem] = []
+    if not isinstance(config, dict):
+        errs.append(
+            ValidationErrorItem(
+                path="trigger.config",
+                message="Schedule config must be an object",
+                code="INVALID_SCHEDULE_CONFIG",
+            )
+        )
+        return errs
+
+    # Frequency check
+    frequency = str(config.get("frequency", "")).lower()
+    if not frequency or frequency not in VALID_SCHEDULE_FREQUENCIES:
+        errs.append(
+            ValidationErrorItem(
+                path="trigger.config.frequency",
+                message=f"Schedule frequency must be one of {sorted(list(VALID_SCHEDULE_FREQUENCIES))}",
+                code="INVALID_FREQUENCY",
+            )
+        )
+
+    # Timezone check
+    tz_str = config.get("timezone")
+    if not tz_str:
+        errs.append(
+            ValidationErrorItem(
+                path="trigger.config.timezone",
+                message="Schedule timezone is required (e.g. 'Asia/Kolkata', 'UTC')",
+                code="MISSING_TIMEZONE",
+            )
+        )
+    else:
+        try:
+            ZoneInfo(str(tz_str))
+        except (ZoneInfoNotFoundError, ValueError, Exception):
+            errs.append(
+                ValidationErrorItem(
+                    path="trigger.config.timezone",
+                    message=f"Invalid IANA timezone '{tz_str}'",
+                    code="INVALID_TIMEZONE",
+                )
+            )
+
+    # Time check (daily & weekly)
+    if frequency in ("daily", "weekly"):
+        time_str = config.get("time")
+        if not time_str or not isinstance(time_str, str):
+            errs.append(
+                ValidationErrorItem(
+                    path="trigger.config.time",
+                    message="Schedule 'time' is required in 'HH:MM' 24-hour format for daily/weekly schedules",
+                    code="MISSING_TIME",
+                )
+            )
+        else:
+            time_parts = time_str.split(":")
+            if (
+                len(time_parts) != 2
+                or not time_parts[0].isdigit()
+                or not time_parts[1].isdigit()
+                or not (0 <= int(time_parts[0]) <= 23)
+                or not (0 <= int(time_parts[1]) <= 59)
+            ):
+                errs.append(
+                    ValidationErrorItem(
+                        path="trigger.config.time",
+                        message=f"Schedule time '{time_str}' must be in valid 'HH:MM' 24-hour format (00:00 to 23:59)",
+                        code="INVALID_TIME",
+                    )
+                )
+
+    # Day of week check (weekly)
+    if frequency == "weekly":
+        dow = config.get("day_of_week")
+        if dow is None:
+            errs.append(
+                ValidationErrorItem(
+                    path="trigger.config.day_of_week",
+                    message="Schedule 'day_of_week' is required for weekly schedules (e.g. 'monday', 'friday')",
+                    code="MISSING_DAY_OF_WEEK",
+                )
+            )
+        elif str(dow).lower() not in VALID_DAYS_OF_WEEK and not (isinstance(dow, int) and 0 <= dow <= 6):
+            errs.append(
+                ValidationErrorItem(
+                    path="trigger.config.day_of_week",
+                    message=f"Invalid day_of_week '{dow}'. Must be one of {sorted(list(VALID_DAYS_OF_WEEK))}",
+                    code="INVALID_DAY_OF_WEEK",
+                )
+            )
+
+    # Minute check (hourly)
+    if frequency == "hourly" and "minute" in config:
+        minute_val = config.get("minute")
+        if not isinstance(minute_val, int) or not (0 <= minute_val <= 59):
+            errs.append(
+                ValidationErrorItem(
+                    path="trigger.config.minute",
+                    message=f"Schedule minute '{minute_val}' must be an integer between 0 and 59",
+                    code="INVALID_MINUTE",
+                )
+            )
+
+    return errs
 
 
 class WorkflowValidationError(ValueError):
@@ -45,7 +164,7 @@ def validate_workflow_definition(definition_data: WorkflowDefinition | dict[str,
     Enforces:
       1. Schema structure (Pydantic models)
       2. Step ID uniqueness and naming
-      3. Dynamic capability resolution via ConnectorRegistry
+      3. Dynamic capability resolution via ConnectorRegistry or Schedule trigger
       4. DAG mapping data flow (no forward or circular references)
       5. Condition operators and field sources
     """
@@ -60,32 +179,55 @@ def validate_workflow_definition(definition_data: WorkflowDefinition | dict[str,
         except ValidationError as exc:
             return ValidationResult(valid=False, errors=_extract_pydantic_errors(exc))
 
-    # 2. Validate trigger capability via Connector Registry (Generic)
+    # 2. Validate trigger capability (Schedule or Connector)
     trigger = wf.trigger
-    trigger_adapter = get_adapter(trigger.connector)
-    if not trigger_adapter:
-        errors.append(
-            ValidationErrorItem(
-                path="trigger.connector",
-                message=f"Unknown connector '{trigger.connector}'",
-                code="UNKNOWN_CONNECTOR",
-            )
-        )
+    is_schedule = (trigger.type == "schedule") or (trigger.connector == "schedule")
+    if is_schedule:
+        errors.extend(validate_schedule_config(trigger.config))
     else:
-        supported_triggers = [t["slug"] for t in trigger_adapter.supported_triggers]
-        if trigger.event not in supported_triggers:
+        if not trigger.connector:
             errors.append(
                 ValidationErrorItem(
-                    path="trigger.event",
-                    message=(
-                        f"Trigger '{trigger.event}' is not supported by connector '{trigger.connector}'. "
-                        f"Supported triggers: {supported_triggers}"
-                    ),
-                    code="UNSUPPORTED_TRIGGER",
+                    path="trigger.connector",
+                    message="Connector slug is required for connector triggers",
+                    code="REQUIRED_CONNECTOR",
                 )
             )
+        else:
+            trigger_adapter = get_adapter(trigger.connector)
+            if not trigger_adapter:
+                errors.append(
+                    ValidationErrorItem(
+                        path="trigger.connector",
+                        message=f"Unknown connector '{trigger.connector}'",
+                        code="UNKNOWN_CONNECTOR",
+                    )
+                )
+            else:
+                supported_triggers = [t["slug"] for t in trigger_adapter.supported_triggers]
+                if trigger.event not in supported_triggers:
+                    errors.append(
+                        ValidationErrorItem(
+                            path="trigger.event",
+                            message=(
+                                f"Trigger '{trigger.event}' is not supported by connector '{trigger.connector}'. "
+                                f"Supported triggers: {supported_triggers}"
+                            ),
+                            code="UNSUPPORTED_TRIGGER",
+                        )
+                    )
 
-    # 3. Validate steps, step IDs, capabilities, and mappings
+    # 3. Validate steps, step count limit, capabilities, and mappings
+    from app.modules.executions.safety_limits import MAX_WORKFLOW_STEPS
+    if len(wf.steps) > MAX_WORKFLOW_STEPS:
+        errors.append(
+            ValidationErrorItem(
+                path="steps",
+                message=f"Workflow exceeds maximum allowed steps ({MAX_WORKFLOW_STEPS}). Current steps: {len(wf.steps)}",
+                code="EXCEEDS_MAX_STEPS",
+            )
+        )
+
     seen_step_ids: set[str] = set()
 
     for idx, step in enumerate(wf.steps):

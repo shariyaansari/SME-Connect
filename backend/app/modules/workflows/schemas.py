@@ -23,8 +23,9 @@ class StepType(str, Enum):
 
 
 class TriggerDefinition(BaseModel):
-    connector: str = Field(..., description="Connector slug, e.g. google_sheets")
-    event: str = Field(..., description="Trigger capability slug, e.g. new_row")
+    type: str | None = Field(None, description="Trigger type, e.g. 'schedule' or 'connector'")
+    connector: str | None = Field(None, description="Connector slug, e.g. google_sheets")
+    event: str = Field(..., description="Trigger capability slug, e.g. new_row or scheduled")
     config: dict[str, Any] = Field(default_factory=dict, description="Trigger configuration")
 
 
@@ -144,5 +145,12 @@ class ConnectorCapabilityResponse(BaseModel):
     connections: list[OrganizationConnectionSummary] = Field(default_factory=list)
     supported_triggers: list[dict[str, Any]] = Field(default_factory=list)
     supported_actions: list[dict[str, Any]] = Field(default_factory=list)
+
+
+from app.modules.executions.schemas import (  # noqa: E402
+    ExecutionDetail,
+    ExecutionSummary,
+    StepExecutionResponse,
+)
 
 

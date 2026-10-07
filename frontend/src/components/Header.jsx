@@ -207,6 +207,7 @@ export default function Header({
           {[
             { id: 'templates', label: 'Templates' },
             { id: 'workflows', label: 'Workflows' },
+            { id: 'executions', label: 'Executions' },
             { id: 'connected', label: 'Connected apps', count: connectionsCount },
             { id: 'catalog', label: 'App catalog' },
             { id: 'team', label: 'Team & workspace', count: membersCount },

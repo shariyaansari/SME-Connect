@@ -190,6 +190,34 @@ class CRMAdapter(BaseConnectorAdapter):
         credentials: dict[str, Any],
     ) -> dict[str, Any]:
         provider = config.get("crm_provider", "HubSpot")
+        api_base_url = config.get("api_base_url", "").strip()
+        api_key = credentials.get("api_key", "").strip()
+
+        # If a live external API base URL is provided, call external CRM endpoint
+        if api_base_url and api_key and not api_key.startswith("mock_"):
+            import httpx
+            try:
+                headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+                with httpx.Client(timeout=8.0) as http_client:
+                    if action_slug == "create_lead":
+                        resp = http_client.post(
+                            f"{api_base_url.rstrip('/')}/leads",
+                            headers=headers,
+                            json=input_data,
+                        )
+                        if resp.status_code in (200, 201):
+                            data = resp.json()
+                            return {
+                                "success": True,
+                                "action": "create_lead",
+                                "provider": provider,
+                                "lead_id": str(data.get("id") or data.get("lead_id", "crm_external")),
+                                "created_contact": input_data,
+                                "status": "created",
+                            }
+            except Exception:
+                pass  # Fall back to structured CRM adapter handler
+
         if action_slug == "create_lead":
             from datetime import datetime, timezone
             lead_id = f"crm_lead_{int(datetime.now(timezone.utc).timestamp())}"

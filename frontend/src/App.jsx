@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import Header from './components/Header';
 import WorkflowsView from './components/WorkflowsView';
 import TemplatesView from './components/TemplatesView';
+import ExecutionsView from './components/ExecutionsView';
 import ConnectedApps from './components/ConnectedApps';
 import ConnectorCatalog from './components/ConnectorCatalog';
 import TeamWorkspaceView from './components/TeamWorkspaceView';
@@ -333,6 +334,14 @@ export default function App() {
         {activeTab === 'workflows' && (
           <WorkflowsView
             onNavigateConnectors={() => setActiveTab('connected')}
+            onNavigateExecutions={() => setActiveTab('executions')}
+          />
+        )}
+
+        {activeTab === 'executions' && (
+          <ExecutionsView
+            currentOrg={currentOrg}
+            onNavigateWorkflows={() => setActiveTab('workflows')}
           />
         )}
 
