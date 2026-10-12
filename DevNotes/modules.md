@@ -144,25 +144,32 @@ Every module below exists to close a specific, evidence-backed gap identified in
 
 ---
 
-## 8. Data Mapping & Transformation Layer
+## 8. Data Mapping & Transformation Layer *(Implemented)*
 
 **Purpose:** Handles the schema differences between source and destination apps — where most real-world integration bugs live.
 
 **Key features:**
 - Field-to-field mapping (e.g. CRM `full_name` → Sheet `Name` column)
-- Basic transformations: formatting, concatenation, default values, type coercion
-- Mapping validation before a workflow can be published
+- 13 Pure transformations: formatting (uppercase, lowercase, titlecase, trim, replace, substring), concatenation (concat), default values (default_value), type coercion (to_string, to_number, to_integer, to_boolean), and date formatting (format_date)
+- Template string interpolation engine (`"{{trigger.values.FirstName}} {{trigger.values.LastName}}"`)
+- Mapping validation before a workflow can be published (DAG path references, transformation syntax, required parameters)
+- Interactive mapping preview endpoint (`POST /workflows/mapping/preview`) for real-time test evaluation on sample contexts
+- Visual workflow builder mapping mode tabs (Static, Variable, Template, Transform) and live test preview drawer
 
 ---
 
-## 9. Flat, Predictable Billing & Subscription *(reframed — closes the pricing-complexity gap)*
+## 9. Flat, Predictable Billing & Subscription *(reframed — closes the pricing-complexity gap)* — [IMPLEMENTED & VERIFIED]
 
 **Purpose:** Zapier's task-based metering is a documented pain point — costs balloon unpredictably as usage grows, which is exactly what budget-constrained SMEs can't tolerate. SME Connect's differentiator here is a flat, workflow-count-based (not task-count-based) pricing model that's easy for a non-technical owner to understand and budget for.
 
 **Key features:**
-- Tiered plans based on **number of active workflows**, not number of executions — removes the "surprise bill" problem
-- Usage dashboard showing plan limits clearly (not buried in fine print)
-- Simple upgrade/downgrade flow, no sales call required
+- Tiered plans based on **number of active workflows** (Free: 2, Starter: 5, Pro: 15, Enterprise: Unlimited), with **unlimited executions and tasks** — removes the "surprise bill" problem
+- Real-time usage dashboard (`BillingView.jsx`) displaying plan limits, active vs paused workflows, and visual progress meters
+- Self-serve upgrade/downgrade flow with monthly and annual billing cycles (with 20% savings on annual) and multi-currency (USD & INR)
+- Quota enforcement at publish time (`POST /workflows/{id}/publish`), rejecting overflows with HTTP 402 and actionable upgrade instructions
+- Role-based access control (Admin required to mutate subscriptions; Editor/Viewer read-only) and complete audit trail logging
+- Verified with 7 dedicated integration tests (`test_module9_billing.py`) and full 186-test backend test suite
+
 
 ---
 

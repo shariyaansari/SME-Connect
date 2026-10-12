@@ -27,6 +27,8 @@ from app.modules.executions.schemas import (
     ExecutionSummary,
     StepExecutionResponse,
 )
+from app.modules.notifications.service import check_and_notify_repeated_failure
+
 
 
 def _utc_now() -> datetime:
@@ -286,27 +288,303 @@ def execute_workflow(
     cached_step_outputs = cached_step_outputs or {}
     cached_step_inputs = cached_step_inputs or {}
 
-    # 6. Execute steps sequentially
-    for idx, step_def in enumerate(steps):
-        step_id = step_def.get("id", f"step_{idx + 1}")
-        step_type = step_def.get("type", "action")
-        step_start_time = _utc_now()
+    # 6. Execute steps sequentially inside unhandled-safe execution context
+    try:
+        for idx, step_def in enumerate(steps):
+            step_id = step_def.get("id", f"step_{idx + 1}")
+            step_type = step_def.get("type", "action")
+            step_start_time = _utc_now()
 
-        # Enforce execution duration timeout limit (Module 6.10)
-        started_at = execution.started_at
-        if started_at is not None and started_at.tzinfo is None:
-            started_at = started_at.replace(tzinfo=timezone.utc)
-        elapsed_seconds = (_utc_now() - started_at).total_seconds() if started_at else 0
-        if elapsed_seconds > MAX_EXECUTION_DURATION_SECONDS:
-            fail_time = _utc_now()
-            execution.status = "failed"
-            execution.failure_category = "timeout"
-            execution.last_error_at = fail_time
-            execution.next_retry_at = None
-            execution.error_message = (
-                f"Execution aborted: exceeded maximum allowed duration limit of {MAX_EXECUTION_DURATION_SECONDS} seconds"
+            # Enforce execution duration timeout limit (Module 6.10)
+            started_at = execution.started_at
+            if started_at is not None and started_at.tzinfo is None:
+                started_at = started_at.replace(tzinfo=timezone.utc)
+            elapsed_seconds = (_utc_now() - started_at).total_seconds() if started_at else 0
+            if elapsed_seconds > MAX_EXECUTION_DURATION_SECONDS:
+                fail_time = _utc_now()
+                execution.status = "failed"
+                execution.failure_category = "timeout"
+                execution.last_error_at = fail_time
+                execution.next_retry_at = None
+                execution.error_message = (
+                    f"Execution aborted: exceeded maximum allowed duration limit of {MAX_EXECUTION_DURATION_SECONDS} seconds"
+                )
+                execution.completed_at = fail_time
+                db.commit()
+                db.refresh(execution)
+                try:
+                    create_audit_log(
+                        db=db,
+                        organization_id=execution.organization_id,
+                        user_id=workflow.created_by,
+                        action="WORKFLOW_EXECUTION_FAILED",
+                        resource_type="workflow_execution",
+                        resource_id=execution.id,
+                        details="Timeout: exceeded maximum execution duration",
+                    )
+                except Exception:
+                    pass
+                return execution
+
+            # Step resume optimization: reuse verified successful outputs from prior attempt to avoid repeating side effects
+            if step_id in cached_step_outputs:
+                cached_out = cached_step_outputs[step_id]
+                cached_in = cached_step_inputs.get(step_id, {})
+                step_exec = WorkflowStepExecution(
+                    execution_id=execution.id,
+                    step_id=step_id,
+                    step_index=idx,
+                    status="success",
+                    input_data=cached_in,
+                    output_data=cached_out,
+                    started_at=step_start_time,
+                    completed_at=step_start_time,
+                    created_at=step_start_time,
+                )
+                db.add(step_exec)
+                context["steps"][step_id] = cached_out
+                executed_step_ids.add(step_id)
+                continue
+
+            if is_skipping:
+                # Step skipped due to prior condition evaluating to False
+                step_exec = WorkflowStepExecution(
+                    execution_id=execution.id,
+                    step_id=step_id,
+                    step_index=idx,
+                    status="skipped",
+                    input_data={},
+                    output_data={"skipped": True, "reason": skip_reason or "Prior condition evaluated to false"},
+                    started_at=None,
+                    completed_at=None,
+                    created_at=step_start_time,
+                )
+                db.add(step_exec)
+                continue
+
+            step_exec = WorkflowStepExecution(
+                execution_id=execution.id,
+                step_id=step_id,
+                step_index=idx,
+                status="running",
+                input_data={},
+                output_data={},
+                started_at=step_start_time,
+                created_at=step_start_time,
             )
-            execution.completed_at = fail_time
+            db.add(step_exec)
+            db.flush()
+
+            # Handle condition step
+            if step_type == "condition":
+                field_expr = step_def.get("field", "")
+                operator = step_def.get("operator", "equals")
+                expected_val = step_def.get("value")
+
+                try:
+                    condition_result = evaluate_condition(
+                        field_expr=field_expr,
+                        operator=operator,
+                        expected_value=expected_val,
+                        context=context,
+                        allowed_step_ids=executed_step_ids,
+                    )
+                    step_exec.status = "success"
+                    step_exec.input_data = {
+                        "field": field_expr,
+                        "operator": operator,
+                        "expected_value": expected_val,
+                    }
+                    step_exec.output_data = {
+                        "condition_met": condition_result,
+                    }
+                    step_exec.completed_at = _utc_now()
+                    context["steps"][step_id] = step_exec.output_data
+                    executed_step_ids.add(step_id)
+
+                    if not condition_result:
+                        is_skipping = True
+                        skip_reason = f"Condition '{field_expr} {operator}' evaluated to false"
+
+                except Exception as exc:
+                    clean_err = sanitize_error_message(str(exc))
+                    cat, retryable = classify_failure(exc)
+                    fail_time = _utc_now()
+
+                    step_exec.status = "failed"
+                    step_exec.failure_category = cat.value
+                    step_exec.error_message = clean_err
+                    step_exec.completed_at = fail_time
+
+                    execution.status = "failed"
+                    execution.failure_category = cat.value
+                    execution.last_error_at = fail_time
+                    if retryable and execution.retry_count < MAX_RETRY_COUNT:
+                        execution.next_retry_at = calculate_next_retry(execution.retry_count, fail_time)
+                    else:
+                        execution.next_retry_at = None
+
+                    execution.error_message = f"Condition step '{step_id}' error: {clean_err}"
+                    execution.completed_at = fail_time
+                    db.commit()
+                    db.refresh(execution)
+                    try:
+                        action_name = "WORKFLOW_RETRY_SCHEDULED" if execution.next_retry_at else "WORKFLOW_EXECUTION_FAILED"
+                        create_audit_log(
+                            db=db,
+                            organization_id=execution.organization_id,
+                            user_id=workflow.created_by,
+                            action=action_name,
+                            resource_type="workflow_execution",
+                            resource_id=execution.id,
+                            details=f"Condition step '{step_id}' failed: {clean_err[:150]}",
+                        )
+                    except Exception:
+                        pass
+                    return execution
+
+            # Handle action step
+            elif step_type == "action":
+                connector_slug = step_def.get("connector", "")
+                action_slug = step_def.get("action", "")
+                step_config = step_def.get("config", {})
+                raw_mapping = step_def.get("mapping", {})
+
+                try:
+                    # Resolve field mappings
+                    resolved_mapping = resolve_mapping(
+                        mapping=raw_mapping,
+                        context=context,
+                        allowed_step_ids=executed_step_ids,
+                    )
+                    resolved_input = dict(step_config)
+                    resolved_input.update(resolved_mapping)
+                    step_exec.input_data = sanitize_data(resolved_input)
+
+                    # Resolve connector adapter
+                    adapter = get_adapter(connector_slug)
+                    if not adapter:
+                        raise ValueError(f"Unknown connector '{connector_slug}'")
+
+                    # Resolve active connection
+                    connection = db.scalar(
+                        select(Connection).where(
+                            Connection.organization_id == workflow.organization_id,
+                            Connection.connector_slug == connector_slug,
+                            Connection.status == "active",
+                        )
+                    )
+                    if not connection:
+                        raise ValueError(
+                            f"No active connection found for connector '{connector_slug}' in this organization"
+                        )
+
+                    # Decrypt credentials in memory only
+                    creds = decrypt_credentials(connection.credentials)
+
+                    # Merge connection config and step config
+                    runtime_config = dict(connection.config or {})
+                    runtime_config.update(step_config)
+
+                    # Delegate to connector adapter
+                    action_result = adapter.execute_action(
+                        action_slug=action_slug,
+                        input_data=resolved_input,
+                        config=runtime_config,
+                        credentials=creds,
+                    )
+                    del creds  # Clean sensitive credentials from scope
+
+                    sanitized_output = sanitize_data(action_result)
+                    step_exec.output_data = sanitized_output
+                    step_exec.status = "success"
+                    step_exec.completed_at = _utc_now()
+
+                    context["steps"][step_id] = sanitized_output
+                    executed_step_ids.add(step_id)
+
+                except Exception as exc:
+                    clean_err = sanitize_error_message(str(exc))
+                    cat, retryable = classify_failure(exc)
+                    fail_time = _utc_now()
+
+                    step_exec.status = "failed"
+                    step_exec.failure_category = cat.value
+                    step_exec.error_message = clean_err
+                    step_exec.completed_at = fail_time
+
+                    execution.status = "failed"
+                    execution.failure_category = cat.value
+                    execution.last_error_at = fail_time
+                    if retryable and execution.retry_count < MAX_RETRY_COUNT:
+                        execution.next_retry_at = calculate_next_retry(execution.retry_count, fail_time)
+                    else:
+                        execution.next_retry_at = None
+
+                    execution.error_message = f"Step '{step_id}' failed: {clean_err}"
+                    execution.completed_at = fail_time
+                    db.commit()
+                    db.refresh(execution)
+                    try:
+                        action_name = "WORKFLOW_RETRY_SCHEDULED" if execution.next_retry_at else "WORKFLOW_EXECUTION_FAILED"
+                        create_audit_log(
+                            db=db,
+                            organization_id=execution.organization_id,
+                            user_id=workflow.created_by,
+                            action=action_name,
+                            resource_type="workflow_execution",
+                            resource_id=execution.id,
+                            details=f"Step '{step_id}' failed ({execution.failure_category}): {clean_err[:150]}",
+                        )
+                    except Exception:
+                        pass
+                    try:
+                        check_and_notify_repeated_failure(
+                            db=db,
+                            workflow_id=workflow.id,
+                            execution_id=execution.id,
+                            organization_id=execution.organization_id,
+                        )
+                    except Exception:
+                        pass
+                    return execution
+
+        # All steps completed successfully
+        execution.status = "success"
+        execution.completed_at = _utc_now()
+        db.commit()
+        db.refresh(execution)
+        try:
+            create_audit_log(
+                db=db,
+                organization_id=execution.organization_id,
+                user_id=workflow.created_by,
+                action="WORKFLOW_EXECUTION_SUCCEEDED",
+                resource_type="workflow_execution",
+                resource_id=execution.id,
+                details=f"Execution completed successfully for workflow '{workflow.name}'",
+            )
+        except Exception:
+            pass
+        return execution
+
+    except Exception as unhandled_exc:
+        # Atomic rollback and transition to failed
+        clean_err = sanitize_error_message(str(unhandled_exc))
+        cat, retryable = classify_failure(unhandled_exc)
+        fail_time = _utc_now()
+
+        try:
+            with db.begin_nested():
+                execution.status = "failed"
+                execution.failure_category = cat.value
+                execution.last_error_at = fail_time
+                if retryable and execution.retry_count < MAX_RETRY_COUNT:
+                    execution.next_retry_at = calculate_next_retry(execution.retry_count, fail_time)
+                else:
+                    execution.next_retry_at = None
+                execution.error_message = f"Unhandled execution error: {clean_err}"
+                execution.completed_at = fail_time
             db.commit()
             db.refresh(execution)
             try:
@@ -317,244 +595,23 @@ def execute_workflow(
                     action="WORKFLOW_EXECUTION_FAILED",
                     resource_type="workflow_execution",
                     resource_id=execution.id,
-                    details="Timeout: exceeded maximum execution duration",
+                    details=f"Execution failed unhandled ({execution.failure_category}): {clean_err[:150]}",
                 )
             except Exception:
                 pass
-            return execution
-
-        # Step resume optimization: reuse verified successful outputs from prior attempt to avoid repeating side effects
-        if step_id in cached_step_outputs:
-            cached_out = cached_step_outputs[step_id]
-            cached_in = cached_step_inputs.get(step_id, {})
-            step_exec = WorkflowStepExecution(
-                execution_id=execution.id,
-                step_id=step_id,
-                step_index=idx,
-                status="success",
-                input_data=cached_in,
-                output_data=cached_out,
-                started_at=step_start_time,
-                completed_at=step_start_time,
-                created_at=step_start_time,
-            )
-            db.add(step_exec)
-            context["steps"][step_id] = cached_out
-            executed_step_ids.add(step_id)
-            continue
-
-        if is_skipping:
-            # Step skipped due to prior condition evaluating to False
-            step_exec = WorkflowStepExecution(
-                execution_id=execution.id,
-                step_id=step_id,
-                step_index=idx,
-                status="skipped",
-                input_data={},
-                output_data={"skipped": True, "reason": skip_reason or "Prior condition evaluated to false"},
-                started_at=None,
-                completed_at=None,
-                created_at=step_start_time,
-            )
-            db.add(step_exec)
-            continue
-
-        step_exec = WorkflowStepExecution(
-            execution_id=execution.id,
-            step_id=step_id,
-            step_index=idx,
-            status="running",
-            input_data={},
-            output_data={},
-            started_at=step_start_time,
-            created_at=step_start_time,
-        )
-        db.add(step_exec)
-        db.flush()
-
-        # Handle condition step
-        if step_type == "condition":
-            field_expr = step_def.get("field", "")
-            operator = step_def.get("operator", "equals")
-            expected_val = step_def.get("value")
-
             try:
-                condition_result = evaluate_condition(
-                    field_expr=field_expr,
-                    operator=operator,
-                    expected_value=expected_val,
-                    context=context,
-                    allowed_step_ids=executed_step_ids,
+                check_and_notify_repeated_failure(
+                    db=db,
+                    workflow_id=workflow.id,
+                    execution_id=execution.id,
+                    organization_id=execution.organization_id,
                 )
-                step_exec.status = "success"
-                step_exec.input_data = {
-                    "field": field_expr,
-                    "operator": operator,
-                    "expected_value": expected_val,
-                }
-                step_exec.output_data = {
-                    "condition_met": condition_result,
-                }
-                step_exec.completed_at = _utc_now()
-                context["steps"][step_id] = step_exec.output_data
-                executed_step_ids.add(step_id)
+            except Exception:
+                pass
+        except Exception:
+            db.rollback()
+        return execution
 
-                if not condition_result:
-                    is_skipping = True
-                    skip_reason = f"Condition '{field_expr} {operator}' evaluated to false"
-
-            except Exception as exc:
-                clean_err = sanitize_error_message(str(exc))
-                cat, retryable = classify_failure(exc)
-                fail_time = _utc_now()
-
-                step_exec.status = "failed"
-                step_exec.failure_category = cat.value
-                step_exec.error_message = clean_err
-                step_exec.completed_at = fail_time
-
-                execution.status = "failed"
-                execution.failure_category = cat.value
-                execution.last_error_at = fail_time
-                if retryable and execution.retry_count < MAX_RETRY_COUNT:
-                    execution.next_retry_at = calculate_next_retry(execution.retry_count, fail_time)
-                else:
-                    execution.next_retry_at = None
-
-                execution.error_message = f"Condition step '{step_id}' error: {clean_err}"
-                execution.completed_at = fail_time
-                db.commit()
-                db.refresh(execution)
-                try:
-                    action_name = "WORKFLOW_RETRY_SCHEDULED" if execution.next_retry_at else "WORKFLOW_EXECUTION_FAILED"
-                    create_audit_log(
-                        db=db,
-                        organization_id=execution.organization_id,
-                        user_id=workflow.created_by,
-                        action=action_name,
-                        resource_type="workflow_execution",
-                        resource_id=execution.id,
-                        details=f"Condition step '{step_id}' failed: {clean_err[:150]}",
-                    )
-                except Exception:
-                    pass
-                return execution
-
-        # Handle action step
-        elif step_type == "action":
-            connector_slug = step_def.get("connector", "")
-            action_slug = step_def.get("action", "")
-            step_config = step_def.get("config", {})
-            raw_mapping = step_def.get("mapping", {})
-
-            try:
-                # Resolve field mappings
-                resolved_mapping = resolve_mapping(
-                    mapping=raw_mapping,
-                    context=context,
-                    allowed_step_ids=executed_step_ids,
-                )
-                resolved_input = dict(step_config)
-                resolved_input.update(resolved_mapping)
-                step_exec.input_data = sanitize_data(resolved_input)
-
-                # Resolve connector adapter
-                adapter = get_adapter(connector_slug)
-                if not adapter:
-                    raise ValueError(f"Unknown connector '{connector_slug}'")
-
-                # Resolve active connection
-                connection = db.scalar(
-                    select(Connection).where(
-                        Connection.organization_id == workflow.organization_id,
-                        Connection.connector_slug == connector_slug,
-                        Connection.status == "active",
-                    )
-                )
-                if not connection:
-                    raise ValueError(
-                        f"No active connection found for connector '{connector_slug}' in this organization"
-                    )
-
-                # Decrypt credentials in memory only
-                creds = decrypt_credentials(connection.credentials)
-
-                # Merge connection config and step config
-                runtime_config = dict(connection.config or {})
-                runtime_config.update(step_config)
-
-                # Delegate to connector adapter
-                action_result = adapter.execute_action(
-                    action_slug=action_slug,
-                    input_data=resolved_input,
-                    config=runtime_config,
-                    credentials=creds,
-                )
-                del creds  # Clean sensitive credentials from scope
-
-                sanitized_output = sanitize_data(action_result)
-                step_exec.output_data = sanitized_output
-                step_exec.status = "success"
-                step_exec.completed_at = _utc_now()
-
-                context["steps"][step_id] = sanitized_output
-                executed_step_ids.add(step_id)
-
-            except Exception as exc:
-                clean_err = sanitize_error_message(str(exc))
-                cat, retryable = classify_failure(exc)
-                fail_time = _utc_now()
-
-                step_exec.status = "failed"
-                step_exec.failure_category = cat.value
-                step_exec.error_message = clean_err
-                step_exec.completed_at = fail_time
-
-                execution.status = "failed"
-                execution.failure_category = cat.value
-                execution.last_error_at = fail_time
-                if retryable and execution.retry_count < MAX_RETRY_COUNT:
-                    execution.next_retry_at = calculate_next_retry(execution.retry_count, fail_time)
-                else:
-                    execution.next_retry_at = None
-
-                execution.error_message = f"Step '{step_id}' failed: {clean_err}"
-                execution.completed_at = fail_time
-                db.commit()
-                db.refresh(execution)
-                try:
-                    action_name = "WORKFLOW_RETRY_SCHEDULED" if execution.next_retry_at else "WORKFLOW_EXECUTION_FAILED"
-                    create_audit_log(
-                        db=db,
-                        organization_id=execution.organization_id,
-                        user_id=workflow.created_by,
-                        action=action_name,
-                        resource_type="workflow_execution",
-                        resource_id=execution.id,
-                        details=f"Step '{step_id}' failed ({execution.failure_category}): {clean_err[:150]}",
-                    )
-                except Exception:
-                    pass
-                return execution
-
-    # All steps completed
-    execution.status = "success"
-    execution.completed_at = _utc_now()
-    db.commit()
-    db.refresh(execution)
-    try:
-        create_audit_log(
-            db=db,
-            organization_id=execution.organization_id,
-            user_id=workflow.created_by,
-            action="WORKFLOW_EXECUTION_SUCCEEDED",
-            resource_type="workflow_execution",
-            resource_id=execution.id,
-            details=f"Execution completed successfully for workflow '{workflow.name}'",
-        )
-    except Exception:
-        pass
-    return execution
 
 
 def retry_execution(
@@ -572,7 +629,24 @@ def retry_execution(
       - Links retry_of_execution_id to original execution.
       - Clears next_retry_at on the original execution.
     """
-    orig_exec = get_execution(db, execution_id, organization_id=organization_id)
+    query = (
+        select(WorkflowExecution)
+        .options(
+            selectinload(WorkflowExecution.step_executions),
+            selectinload(WorkflowExecution.workflow),
+            selectinload(WorkflowExecution.workflow_version),
+        )
+        .where(WorkflowExecution.id == execution_id)
+    )
+    if organization_id is not None:
+        query = query.where(WorkflowExecution.organization_id == organization_id)
+    if db.bind and db.bind.dialect.name == "postgresql":
+        query = query.with_for_update()
+
+    orig_exec = db.scalar(query)
+    if not orig_exec:
+        raise ValueError("Execution not found")
+
     if orig_exec.status != "failed":
         raise ValueError(
             f"Cannot retry execution with status '{orig_exec.status}'. Only failed executions can be retried."

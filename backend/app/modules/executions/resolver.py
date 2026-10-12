@@ -147,18 +147,32 @@ def resolve_mapping(
         if isinstance(expr, str):
             if expr.startswith("trigger.") or expr.startswith("steps."):
                 resolved[target_key] = resolve_path(expr, context, allowed_step_ids)
+            elif "{{" in expr and "}}" in expr:
+                from app.modules.transformations.engine import evaluate_template
+                resolved[target_key] = evaluate_template(expr, context, allowed_step_ids)
             else:
                 # Static literal string
                 resolved[target_key] = expr
         elif isinstance(expr, dict):
-            resolved[target_key] = resolve_mapping(expr, context, allowed_step_ids)
+            if "transform" in expr or ("type" in expr and isinstance(expr.get("type"), str)):
+                from app.modules.transformations.engine import evaluate_transformation
+                resolved[target_key] = evaluate_transformation(expr, context, allowed_step_ids)
+            else:
+                resolved[target_key] = resolve_mapping(expr, context, allowed_step_ids)
         elif isinstance(expr, list):
             resolved_list = []
             for item in expr:
                 if isinstance(item, str) and (item.startswith("trigger.") or item.startswith("steps.")):
                     resolved_list.append(resolve_path(item, context, allowed_step_ids))
+                elif isinstance(item, str) and ("{{" in item and "}}" in item):
+                    from app.modules.transformations.engine import evaluate_template
+                    resolved_list.append(evaluate_template(item, context, allowed_step_ids))
                 elif isinstance(item, dict):
-                    resolved_list.append(resolve_mapping(item, context, allowed_step_ids))
+                    if "transform" in item or ("type" in item and isinstance(item.get("type"), str)):
+                        from app.modules.transformations.engine import evaluate_transformation
+                        resolved_list.append(evaluate_transformation(item, context, allowed_step_ids))
+                    else:
+                        resolved_list.append(resolve_mapping(item, context, allowed_step_ids))
                 else:
                     resolved_list.append(item)
             resolved[target_key] = resolved_list
@@ -166,3 +180,4 @@ def resolve_mapping(
             resolved[target_key] = expr
 
     return resolved
+

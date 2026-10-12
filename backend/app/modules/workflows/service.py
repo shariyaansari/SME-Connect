@@ -409,7 +409,11 @@ def publish_workflow(
             f"Cannot publish workflow: The following connectors do not have an active connection in this organization: {missing_list}"
         )
 
-    # 3. State transition
+    # 3. Check subscription active workflow quota (Module 9 Flat Billing)
+    from app.modules.billing.service import check_workflow_publish_limit
+    check_workflow_publish_limit(db, membership.organization_id, target_workflow_id=workflow.id)
+
+    # 4. State transition
     now = datetime.now(timezone.utc)
     if target_version.published_at is None:
         target_version.published_at = now

@@ -12,6 +12,7 @@ export default defineConfig({
       '/connectors': 'http://127.0.0.1:8000',
       '/workflows': 'http://127.0.0.1:8000',
       '/templates': 'http://127.0.0.1:8000',
+      '/executions': 'http://127.0.0.1:8000',
     },
   },
 })

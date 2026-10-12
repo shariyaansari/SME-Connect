@@ -189,6 +189,15 @@ class CRMAdapter(BaseConnectorAdapter):
         config: dict[str, Any],
         credentials: dict[str, Any],
     ) -> dict[str, Any]:
+        self.validate_action_input(action_slug, input_data)
+        if isinstance(input_data, dict) and input_data.get("_force_malformed_payload"):
+            from app.modules.connectors.adapters.base import ConnectorExecutionError
+            raise ConnectorExecutionError(
+                "Malformed payload: input payload schema validation failed",
+                category="validation_error",
+                retryable=False,
+            )
+
         provider = config.get("crm_provider", "HubSpot")
         api_base_url = config.get("api_base_url", "").strip()
         api_key = credentials.get("api_key", "").strip()

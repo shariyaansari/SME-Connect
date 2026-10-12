@@ -119,6 +119,11 @@ npm run build
 - `/auth` - registration, login, verification, refresh, and current-user details
 - `/organizations` - organizations, members, invitations, and roles
 - `/connectors` - connector catalog and organization connections
+- `/workflows` - workflow builder, versions, and validation
+- `/templates` - guided template library and one-click wizard
+- `/executions` - execution runner, schedule engine, and retries
+- `/monitoring` - monitoring dashboard, metrics, and monthly task usage
+- `/notifications` - repeated failure alerts and notification management
 - `/docs` - generated Swagger UI for the running API
 
 ## Product Documentation
@@ -130,3 +135,5 @@ npm run build
 - [`docs/module-1-user-organization.md`](docs/module-1-user-organization.md)
 - [`docs/module-2-connectors.md`](docs/module-2-connectors.md)
 - [`docs/module-3-workflows.md`](docs/module-3-workflows.md)
+- [`docs/module-3a-onboarding-template-library.md`](docs/module-3a-onboarding-template-library.md)
+- [`docs/module-7-monitoring-dashboard.md`](docs/module-7-monitoring-dashboard.md)

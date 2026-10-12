@@ -783,4 +783,142 @@ class WorkflowTriggerEvent(Base):
     workflow: Mapped["Workflow"] = relationship("Workflow", backref="trigger_events")
     execution: Mapped["WorkflowExecution | None"] = relationship("WorkflowExecution", backref="trigger_event")
 
+
+class Notification(Base):
+    __tablename__ = "notifications"
+
+    id: Mapped[int] = mapped_column(
+        primary_key=True,
+        index=True,
+    )
+
+    organization_id: Mapped[int] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    workflow_id: Mapped[int | None] = mapped_column(
+        ForeignKey("workflows.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+
+    execution_id: Mapped[int | None] = mapped_column(
+        ForeignKey("workflow_executions.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    title: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+    )
+
+    message: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+    )
+
+    severity: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="warning",
+    )
+
+    notification_type: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        default="repeated_failure",
+    )
+
+    is_read: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        nullable=False,
+        index=True,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utc_now,
+        nullable=False,
+    )
+
+    read_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    organization: Mapped["Organization"] = relationship("Organization", backref="notifications")
+    workflow: Mapped["Workflow | None"] = relationship("Workflow", backref="notifications")
+    execution: Mapped["WorkflowExecution | None"] = relationship("WorkflowExecution", backref="notifications")
+
+
+class Subscription(Base):
+    __tablename__ = "subscriptions"
+
+    id: Mapped[int] = mapped_column(
+        primary_key=True,
+        index=True,
+    )
+
+    organization_id: Mapped[int] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        unique=True,
+        nullable=False,
+        index=True,
+    )
+
+    plan_tier: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        default="free",
+    )
+
+    status: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        default="active",
+    )
+
+    billing_cycle: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="monthly",
+    )
+
+    current_period_start: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utc_now,
+        nullable=False,
+    )
+
+    current_period_end: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    cancel_at_period_end: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        nullable=False,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utc_now,
+        nullable=False,
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utc_now,
+        onupdate=utc_now,
+        nullable=False,
+    )
+
+    organization: Mapped["Organization"] = relationship("Organization", backref="subscription")
+
+
 

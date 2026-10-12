@@ -135,6 +135,248 @@ def validate_schedule_config(config: dict[str, Any]) -> list[ValidationErrorItem
     return errs
 
 
+VALID_TRANSFORMATION_TYPES = {
+    "concat",
+    "trim",
+    "uppercase",
+    "lowercase",
+    "titlecase",
+    "replace",
+    "substring",
+    "default_value",
+    "to_string",
+    "to_number",
+    "to_integer",
+    "to_boolean",
+    "format_date",
+}
+
+
+def validate_mapping_expression(
+    expr: Any,
+    current_step_id: str,
+    seen_step_ids: set[str],
+    path: str,
+) -> list[ValidationErrorItem]:
+    """
+    Validates a single mapping expression or transformation spec for:
+      - Valid DAG path references (trigger.x or steps.<step_id>.y)
+      - Forward and self references
+      - Template string interpolation syntax ({{...}})
+      - Structured transformation specifications and parameters
+    """
+    errs: list[ValidationErrorItem] = []
+
+    if isinstance(expr, str):
+        if expr.startswith("trigger."):
+            parts = expr.split(".", 1)
+            if len(parts) < 2 or not parts[1].strip():
+                errs.append(
+                    ValidationErrorItem(
+                        path=path,
+                        message=f"Mapping source expression '{expr}' must specify a sub-property after 'trigger.'",
+                        code="MALFORMED_MAPPING_PATH",
+                    )
+                )
+        elif expr.startswith("steps."):
+            parts = expr.split(".")
+            if len(parts) < 3 or not parts[2].strip():
+                errs.append(
+                    ValidationErrorItem(
+                        path=path,
+                        message=f"Mapping source expression '{expr}' must follow format 'steps.<step_id>.<property>'",
+                        code="MALFORMED_MAPPING_PATH",
+                    )
+                )
+            else:
+                ref_step_id = parts[1]
+                if ref_step_id == current_step_id:
+                    errs.append(
+                        ValidationErrorItem(
+                            path=path,
+                            message=f"Step '{current_step_id}' cannot reference its own output in mapping",
+                            code="SELF_REFERENCE_MAPPING",
+                        )
+                    )
+                elif ref_step_id not in seen_step_ids:
+                    errs.append(
+                        ValidationErrorItem(
+                            path=path,
+                            message=(
+                                f"Step '{current_step_id}' references step '{ref_step_id}' which does not precede it. "
+                                f"Available preceding steps: {sorted(list(seen_step_ids)) or ['none']}"
+                            ),
+                            code="INVALID_STEP_REFERENCE",
+                        )
+                    )
+        elif "{{" in expr and "}}" in expr:
+            template_vars = re.findall(r"\{\{\s*([a-zA-Z0-9_\.\-]+)\s*\}\}", expr)
+            if not template_vars:
+                errs.append(
+                    ValidationErrorItem(
+                        path=path,
+                        message=f"Template expression '{expr}' contains invalid placeholder syntax",
+                        code="MALFORMED_TEMPLATE_EXPRESSION",
+                    )
+                )
+            for var in template_vars:
+                if var.startswith("trigger."):
+                    parts = var.split(".", 1)
+                    if len(parts) < 2 or not parts[1].strip():
+                        errs.append(
+                            ValidationErrorItem(
+                                path=path,
+                                message=f"Template variable '{var}' must specify a sub-property after 'trigger.'",
+                                code="MALFORMED_MAPPING_PATH",
+                            )
+                        )
+                elif var.startswith("steps."):
+                    parts = var.split(".")
+                    if len(parts) < 3 or not parts[2].strip():
+                        errs.append(
+                            ValidationErrorItem(
+                                path=path,
+                                message=f"Template variable '{var}' must follow format 'steps.<step_id>.<property>'",
+                                code="MALFORMED_MAPPING_PATH",
+                            )
+                        )
+                    else:
+                        ref_step_id = parts[1]
+                        if ref_step_id == current_step_id:
+                            errs.append(
+                                ValidationErrorItem(
+                                    path=path,
+                                    message=f"Step '{current_step_id}' cannot reference its own output in template '{{{{{var}}}}}'",
+                                    code="SELF_REFERENCE_MAPPING",
+                                )
+                            )
+                        elif ref_step_id not in seen_step_ids:
+                            errs.append(
+                                ValidationErrorItem(
+                                    path=path,
+                                    message=(
+                                        f"Step '{current_step_id}' references step '{ref_step_id}' in template '{{{{{var}}}}}' which does not precede it. "
+                                        f"Available preceding steps: {sorted(list(seen_step_ids)) or ['none']}"
+                                    ),
+                                    code="INVALID_STEP_REFERENCE",
+                                )
+                            )
+                else:
+                    errs.append(
+                        ValidationErrorItem(
+                            path=path,
+                            message=f"Template variable '{var}' must start with 'trigger.' or 'steps.'",
+                            code="MALFORMED_MAPPING_PATH",
+                        )
+                    )
+
+    elif isinstance(expr, dict):
+        if "transform" in expr or ("type" in expr and isinstance(expr.get("type"), str) and expr.get("type") in VALID_TRANSFORMATION_TYPES):
+            tf_type = str(expr.get("transform") or expr.get("type", "")).lower()
+            if tf_type not in VALID_TRANSFORMATION_TYPES:
+                errs.append(
+                    ValidationErrorItem(
+                        path=f"{path}.transform",
+                        message=f"Unsupported transformation type '{tf_type}'. Supported: {sorted(list(VALID_TRANSFORMATION_TYPES))}",
+                        code="UNSUPPORTED_TRANSFORMATION",
+                    )
+                )
+            else:
+                if tf_type == "concat":
+                    sources = expr.get("sources")
+                    if not isinstance(sources, list) or len(sources) == 0:
+                        errs.append(
+                            ValidationErrorItem(
+                                path=f"{path}.sources",
+                                message="Transformation 'concat' requires a non-empty 'sources' list",
+                                code="MISSING_TRANSFORMATION_PARAMETER",
+                            )
+                        )
+                    else:
+                        for idx, s in enumerate(sources):
+                            errs.extend(validate_mapping_expression(s, current_step_id, seen_step_ids, f"{path}.sources[{idx}]"))
+                elif tf_type in ("trim", "uppercase", "lowercase", "titlecase", "to_string", "to_number", "to_integer", "to_boolean"):
+                    if "source" not in expr:
+                        errs.append(
+                            ValidationErrorItem(
+                                path=f"{path}.source",
+                                message=f"Transformation '{tf_type}' requires a 'source' parameter",
+                                code="MISSING_TRANSFORMATION_PARAMETER",
+                            )
+                        )
+                    else:
+                        errs.extend(validate_mapping_expression(expr["source"], current_step_id, seen_step_ids, f"{path}.source"))
+                elif tf_type == "replace":
+                    if "source" not in expr:
+                        errs.append(
+                            ValidationErrorItem(
+                                path=f"{path}.source",
+                                message="Transformation 'replace' requires a 'source' parameter",
+                                code="MISSING_TRANSFORMATION_PARAMETER",
+                            )
+                        )
+                    else:
+                        errs.extend(validate_mapping_expression(expr["source"], current_step_id, seen_step_ids, f"{path}.source"))
+                    if "find" not in expr:
+                        errs.append(
+                            ValidationErrorItem(
+                                path=f"{path}.find",
+                                message="Transformation 'replace' requires a 'find' parameter",
+                                code="MISSING_TRANSFORMATION_PARAMETER",
+                            )
+                        )
+                elif tf_type == "substring":
+                    if "source" not in expr:
+                        errs.append(
+                            ValidationErrorItem(
+                                path=f"{path}.source",
+                                message="Transformation 'substring' requires a 'source' parameter",
+                                code="MISSING_TRANSFORMATION_PARAMETER",
+                            )
+                        )
+                    else:
+                        errs.extend(validate_mapping_expression(expr["source"], current_step_id, seen_step_ids, f"{path}.source"))
+                elif tf_type == "default_value":
+                    if "source" not in expr:
+                        errs.append(
+                            ValidationErrorItem(
+                                path=f"{path}.source",
+                                message="Transformation 'default_value' requires a 'source' parameter",
+                                code="MISSING_TRANSFORMATION_PARAMETER",
+                            )
+                        )
+                    else:
+                        errs.extend(validate_mapping_expression(expr["source"], current_step_id, seen_step_ids, f"{path}.source"))
+                    if "default" not in expr:
+                        errs.append(
+                            ValidationErrorItem(
+                                path=f"{path}.default",
+                                message="Transformation 'default_value' requires a 'default' parameter",
+                                code="MISSING_TRANSFORMATION_PARAMETER",
+                            )
+                        )
+                elif tf_type == "format_date":
+                    if "source" not in expr:
+                        errs.append(
+                            ValidationErrorItem(
+                                path=f"{path}.source",
+                                message="Transformation 'format_date' requires a 'source' parameter",
+                                code="MISSING_TRANSFORMATION_PARAMETER",
+                            )
+                        )
+                    else:
+                        errs.extend(validate_mapping_expression(expr["source"], current_step_id, seen_step_ids, f"{path}.source"))
+        else:
+            for sub_key, sub_val in expr.items():
+                errs.extend(validate_mapping_expression(sub_val, current_step_id, seen_step_ids, f"{path}.{sub_key}"))
+
+    elif isinstance(expr, list):
+        for idx, item in enumerate(expr):
+            errs.extend(validate_mapping_expression(item, current_step_id, seen_step_ids, f"{path}[{idx}]"))
+
+    return errs
+
+
 class WorkflowValidationError(ValueError):
     """Raised when a workflow definition fails semantic or structural validation."""
 
@@ -279,51 +521,16 @@ def validate_workflow_definition(definition_data: WorkflowDefinition | dict[str,
                         )
                     )
 
-            # Validate mappings (DAG data flow)
+            # Validate mappings (DAG data flow, transformations, templates)
             for target_field, source_expr in (step.mapping or {}).items():
-                if isinstance(source_expr, str):
-                    if source_expr.startswith("trigger."):
-                        # Valid reference to workflow entry-point trigger
-                        parts = source_expr.split(".", 1)
-                        if len(parts) < 2 or not parts[1].strip():
-                            errors.append(
-                                ValidationErrorItem(
-                                    path=f"{step_path}.mapping.{target_field}",
-                                    message=f"Mapping source expression '{source_expr}' must specify a sub-property after 'trigger.'",
-                                    code="MALFORMED_MAPPING_PATH",
-                                )
-                            )
-                    elif source_expr.startswith("steps."):
-                        parts = source_expr.split(".")
-                        if len(parts) < 3:
-                            errors.append(
-                                ValidationErrorItem(
-                                    path=f"{step_path}.mapping.{target_field}",
-                                    message=f"Mapping source expression '{source_expr}' must follow format 'steps.<step_id>.<property>'",
-                                    code="MALFORMED_MAPPING_PATH",
-                                )
-                            )
-                        else:
-                            ref_step_id = parts[1]
-                            if ref_step_id == step.id:
-                                errors.append(
-                                    ValidationErrorItem(
-                                        path=f"{step_path}.mapping.{target_field}",
-                                        message=f"Step '{step.id}' cannot reference its own output in mapping",
-                                        code="SELF_REFERENCE_MAPPING",
-                                    )
-                                )
-                            elif ref_step_id not in seen_step_ids:
-                                errors.append(
-                                    ValidationErrorItem(
-                                        path=f"{step_path}.mapping.{target_field}",
-                                        message=(
-                                            f"Step '{step.id}' references step '{ref_step_id}' which does not precede it. "
-                                            f"Available preceding steps: {sorted(list(seen_step_ids)) or ['none']}"
-                                        ),
-                                        code="INVALID_STEP_REFERENCE",
-                                    )
-                                )
+                errors.extend(
+                    validate_mapping_expression(
+                        expr=source_expr,
+                        current_step_id=step.id,
+                        seen_step_ids=seen_step_ids,
+                        path=f"{step_path}.mapping.{target_field}",
+                    )
+                )
 
         elif isinstance(step, ConditionStepDefinition):
             # Validate condition field source reference

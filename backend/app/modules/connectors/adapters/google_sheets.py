@@ -192,6 +192,16 @@ class GoogleSheetsAdapter(BaseConnectorAdapter):
         config: dict[str, Any],
         credentials: dict[str, Any],
     ) -> dict[str, Any]:
+        self.validate_action_input(action_slug, input_data)
+        if action_slug == "append_row" and isinstance(input_data, dict):
+            if "values" in input_data and not isinstance(input_data["values"], (dict, list)):
+                from app.modules.connectors.adapters.base import ConnectorExecutionError
+                raise ConnectorExecutionError(
+                    f"Malformed payload: 'values' must be an object or list, got {type(input_data['values']).__name__}",
+                    category="validation_error",
+                    retryable=False,
+                )
+
         sheet_id = config.get("spreadsheet_id", "sheet_default")
         sheet_name = config.get("sheet_name", "Sheet1") or "Sheet1"
         access_token = credentials.get("access_token") or credentials.get("client_secret", "")

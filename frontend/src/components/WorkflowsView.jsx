@@ -12,7 +12,12 @@ import {
   Clock,
   AlertTriangle,
   RotateCcw,
-  Info
+  Info,
+  Wand2,
+  ChevronDown,
+  ChevronRight,
+  PlayCircle,
+  RefreshCw
 } from 'lucide-react';
 import {
   DndContext,
@@ -193,7 +198,7 @@ function renderHealthBadge(health) {
   );
 }
 
-export default function WorkflowsView({ onNavigateConnectors, onNavigateExecutions }) {
+export default function WorkflowsView({ onNavigateConnectors, onNavigateExecutions, onNavigateBilling }) {
   const [workflows, setWorkflows] = useState([]);
   const [capabilities, setCapabilities] = useState([]);
   const [workflowHealthMap, setWorkflowHealthMap] = useState({});
@@ -218,6 +223,26 @@ export default function WorkflowsView({ onNavigateConnectors, onNavigateExecutio
   const [showInsertMenu, setShowInsertMenu] = useState(null);
   const [showConditionModal, setShowConditionModal] = useState(false);
   const [conditionForm, setConditionForm] = useState({ field: '', operator: 'equals', value: '' });
+
+  // Data Mapping & Transformations State (Module 8)
+  const [transformCatalog, setTransformCatalog] = useState([]);
+  const [showPreviewSection, setShowPreviewSection] = useState(false);
+  const [previewContextJson, setPreviewContextJson] = useState(JSON.stringify({
+    trigger: {
+      values: {
+        FirstName: "Aarav",
+        LastName: "Sharma",
+        Email: "AARAV.SHARMA@ENTERPRISE.IN",
+        Phone: "+91-98765-43210",
+        Amount: "$4,500.00",
+        Status: "active",
+        JoinedDate: "2026-10-12T09:30:00Z"
+      }
+    }
+  }, null, 2));
+  const [previewResult, setPreviewResult] = useState(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState(null);
 
   const CONDITION_OPERATORS = [
     { value: 'equals', label: 'Equals' },
@@ -269,12 +294,14 @@ export default function WorkflowsView({ onNavigateConnectors, onNavigateExecutio
   async function loadData() {
     try {
       setLoading(true);
-      const [wfs, caps] = await Promise.all([
+      const [wfs, caps, transforms] = await Promise.all([
         api.fetchWorkflows(),
-        api.fetchWorkflowCapabilities()
+        api.fetchWorkflowCapabilities(),
+        api.fetchTransformCatalog().catch(() => [])
       ]);
       setWorkflows(wfs || []);
       setCapabilities(caps || []);
+      setTransformCatalog(transforms || []);
 
       // Load reliability health for workflows
       try {
@@ -327,7 +354,13 @@ export default function WorkflowsView({ onNavigateConnectors, onNavigateExecutio
       }
     } catch (err) {
       console.error(err);
-      alert('Failed to change workflow status: ' + err.message);
+      if (err.status === 402 || (err.message && err.message.toLowerCase().includes('plan limit'))) {
+        if (confirm(`${err.message}\n\nWould you like to view subscription plans to upgrade?`)) {
+          if (onNavigateBilling) onNavigateBilling();
+        }
+      } else {
+        alert('Failed to change workflow status: ' + err.message);
+      }
     }
   };
 
@@ -534,30 +567,53 @@ export default function WorkflowsView({ onNavigateConnectors, onNavigateExecutio
     }
   };
 
-  const getTriggerVariables = () => {
-    if (!draftDefinition?.trigger?.connector || !draftDefinition?.trigger?.event) return [];
-    const cap = (capabilities || []).find(c => c.slug === draftDefinition.trigger.connector);
-    if (!cap) return [];
-    const trig = (cap.supported_triggers || []).find(t => t.slug === draftDefinition.trigger.event);
-    if (!trig || !trig.payload_schema) return [];
-
-    const vars = Object.entries(trig.payload_schema).map(([key, schema]) => ({
-      path: `trigger.${key}`,
-      label: schema.label || key,
-      description: schema.description || ''
-    }));
-
-    // Also add common row value fields for Google Sheets
-    if (draftDefinition.trigger.connector === 'google_sheets') {
-      vars.push(
-        { path: 'trigger.values.Name', label: 'Row Value: Name', description: '' },
-        { path: 'trigger.values.Email', label: 'Row Value: Email', description: '' },
-        { path: 'trigger.values.Phone', label: 'Row Value: Phone', description: '' },
-        { path: 'trigger.values.Company', label: 'Row Value: Company', description: '' },
-      );
+  const getAvailableVariables = () => {
+    const vars = [];
+    if (draftDefinition?.trigger) {
+      const cap = (capabilities || []).find(c => c.slug === draftDefinition.trigger.connector);
+      const trig = (cap?.supported_triggers || []).find(t => t.slug === draftDefinition.trigger.event);
+      if (trig?.payload_schema) {
+        Object.entries(trig.payload_schema).forEach(([key, schema]) => {
+          vars.push({
+            path: `trigger.${key}`,
+            label: `Trigger: ${schema.label || key}`,
+            group: 'Trigger Data',
+          });
+        });
+      }
+      if (draftDefinition.trigger.connector === 'google_sheets') {
+        vars.push(
+          { path: 'trigger.values.Name', label: 'Row Value: Name', group: 'Trigger Data' },
+          { path: 'trigger.values.FirstName', label: 'Row Value: FirstName', group: 'Trigger Data' },
+          { path: 'trigger.values.LastName', label: 'Row Value: LastName', group: 'Trigger Data' },
+          { path: 'trigger.values.Email', label: 'Row Value: Email', group: 'Trigger Data' },
+          { path: 'trigger.values.Phone', label: 'Row Value: Phone', group: 'Trigger Data' },
+          { path: 'trigger.values.Company', label: 'Row Value: Company', group: 'Trigger Data' },
+        );
+      }
     }
+
+    // Preceding steps outputs
+    if (draftDefinition?.steps) {
+      const currIdx = editingStepId ? draftDefinition.steps.findIndex(s => s.id === editingStepId) : -1;
+      const precedingSteps = currIdx >= 0 ? draftDefinition.steps.slice(0, currIdx) : draftDefinition.steps;
+      precedingSteps.forEach(s => {
+        vars.push({
+          path: `steps.${s.id}.output`,
+          label: `Step [${s.id}]: Output`,
+          group: 'Preceding Steps',
+        });
+        vars.push({
+          path: `steps.${s.id}.id`,
+          label: `Step [${s.id}]: ID`,
+          group: 'Preceding Steps',
+        });
+      });
+    }
+
     return vars;
   };
+  const getTriggerVariables = getAvailableVariables;
 
   const getConnectorName = (slug) => {
     const cap = (capabilities || []).find(c => c.slug === slug);
@@ -654,7 +710,13 @@ export default function WorkflowsView({ onNavigateConnectors, onNavigateExecutio
                     await loadData();
                   } catch (err) {
                     console.error(err);
-                    if (err.validationErrors) {
+                    if (err.status === 402 || (err.message && err.message.toLowerCase().includes('plan limit'))) {
+                      setValidationResult({
+                        valid: false,
+                        errors: `${err.message}`,
+                        isBillingLimit: true,
+                      });
+                    } else if (err.validationErrors) {
                       setValidationResult({ valid: false, errors: err.validationErrors });
                     } else {
                       setValidationResult({ valid: false, errors: err.message });
@@ -760,9 +822,20 @@ export default function WorkflowsView({ onNavigateConnectors, onNavigateExecutio
               </div>
             ) : (
               <div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--error)', fontSize: '14px', fontWeight: 500, marginBottom: '8px' }}>
-                  <span style={{ fontSize: '16px' }}>&times;</span>
-                  Workflow has errors
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', color: 'var(--error)', fontSize: '14px', fontWeight: 500, marginBottom: '8px', flexWrap: 'wrap' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '16px' }}>&times;</span>
+                    {validationResult.isBillingLimit ? 'Subscription Plan Limit Reached' : 'Workflow has errors'}
+                  </div>
+                  {validationResult.isBillingLimit && onNavigateBilling && (
+                    <button
+                      className="btn-primary"
+                      onClick={onNavigateBilling}
+                      style={{ fontSize: '12px', padding: '4px 12px' }}
+                    >
+                      View Plans & Upgrade
+                    </button>
+                  )}
                 </div>
                 <ul style={{ margin: 0, paddingLeft: '24px', color: 'var(--text-secondary)', fontSize: '13px' }}>
                   {Array.isArray(validationResult.errors) ? validationResult.errors.map((err, i) => (
@@ -1262,7 +1335,7 @@ export default function WorkflowsView({ onNavigateConnectors, onNavigateExecutio
         }}>
           <div style={{
             backgroundColor: 'var(--surface-2)', borderLeft: '1px solid var(--border)',
-            width: '450px', maxWidth: '100vw', padding: '24px', height: '100%', overflowY: 'auto',
+            width: '580px', maxWidth: '100vw', padding: '24px', height: '100%', overflowY: 'auto',
             boxShadow: '-4px 0 24px rgba(0,0,0,0.2)',
             animation: 'slideInRight 0.2s ease-out'
           }}>
@@ -1308,52 +1381,653 @@ export default function WorkflowsView({ onNavigateConnectors, onNavigateExecutio
               </div>
             )}
 
-            {/* Dynamic input_schema fields with mapping */}
+            {/* Dynamic input_schema fields with mapping & transformations */}
             {actionForm.connector && actionForm.action && (() => {
               const selectedAction = capabilities.find(c => c.slug === actionForm.connector)?.supported_actions?.find(a => a.slug === actionForm.action);
               if (!selectedAction?.input_schema || Object.keys(selectedAction.input_schema).length === 0) {
                 return <div style={{ marginTop: '16px', fontSize: '13px', color: 'var(--text-secondary)' }}>No configuration required for this action.</div>;
               }
+
+              const availableVars = getAvailableVariables();
+
+              const handleRunMappingPreview = async () => {
+                setPreviewLoading(true);
+                setPreviewError(null);
+                setPreviewResult(null);
+                try {
+                  let parsedContext = {};
+                  try {
+                    parsedContext = JSON.parse(previewContextJson);
+                  } catch (e) {
+                    setPreviewError(`Invalid Sample Context JSON: ${e.message}`);
+                    setPreviewLoading(false);
+                    return;
+                  }
+                  const res = await api.previewMapping({
+                    mapping: actionForm.mapping || {},
+                    sample_context: parsedContext,
+                  });
+                  setPreviewResult(res);
+                } catch (err) {
+                  setPreviewError(err.message || 'Mapping preview evaluation failed');
+                } finally {
+                  setPreviewLoading(false);
+                }
+              };
+
               return (
                 <div style={{ marginTop: '16px' }}>
-                  <label style={{ fontWeight: 600, fontSize: '13px', marginBottom: '8px', display: 'block' }}>Field Configuration</label>
-                  {Object.entries(selectedAction.input_schema).map(([key, field]) => (
-                    <div key={key} className="form-group" style={{ marginBottom: '12px' }}>
-                      <label style={{ fontSize: '12px' }}>{field.label || key} {field.required ? '*' : ''}</label>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                        <select
-                          value={actionForm.mapping?.[key] || ''}
-                          onChange={(e) => {
-                            const newMapping = { ...actionForm.mapping };
-                            if (e.target.value) { newMapping[key] = e.target.value; } else { delete newMapping[key]; }
-                            setActionForm({ ...actionForm, mapping: newMapping });
-                          }}
-                          style={{ width: '100%', minWidth: 0, padding: '8px', borderRadius: '4px', border: '1px solid var(--border)', backgroundColor: 'var(--surface-0)', color: 'var(--text-primary)' }}
-                        >
-                          <option value="">Static value</option>
-                          <optgroup label="Trigger Outputs">
-                            {getTriggerVariables().map(v => (
-                              <option key={v.path} value={v.path}>{v.label} ({v.path})</option>
-                            ))}
-                          </optgroup>
-                        </select>
-                        {!actionForm.mapping?.[key] && (
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+                    <label style={{ fontWeight: 600, fontSize: '13px', margin: 0, color: 'var(--text-primary)' }}>
+                      Field Mapping & Transformations
+                    </label>
+                    <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                      Module 8 Data Layer
+                    </span>
+                  </div>
+
+                  {Object.entries(selectedAction.input_schema).map(([key, field]) => {
+                    const currentVal = actionForm.mapping?.[key];
+                    let mode = 'static';
+                    if (currentVal && typeof currentVal === 'object' && (currentVal.transform || currentVal.type)) {
+                      mode = 'transform';
+                    } else if (typeof currentVal === 'string' && currentVal.includes('{{') && currentVal.includes('}}')) {
+                      mode = 'template';
+                    } else if (typeof currentVal === 'string' && (currentVal.startsWith('trigger.') || currentVal.startsWith('steps.'))) {
+                      mode = 'direct';
+                    }
+
+                    const setFieldMode = (newMode) => {
+                      const newMapping = { ...(actionForm.mapping || {}) };
+                      const newConfig = { ...(actionForm.config || {}) };
+                      if (newMode === 'static') {
+                        delete newMapping[key];
+                        if (newConfig[key] === undefined) newConfig[key] = '';
+                      } else if (newMode === 'direct') {
+                        newMapping[key] = availableVars[0]?.path || 'trigger.values.Name';
+                        delete newConfig[key];
+                      } else if (newMode === 'template') {
+                        newMapping[key] = availableVars[0] ? `{{${availableVars[0].path}}}` : '{{trigger.values.Name}}';
+                        delete newConfig[key];
+                      } else if (newMode === 'transform') {
+                        newMapping[key] = {
+                          transform: 'trim',
+                          source: availableVars[0]?.path || 'trigger.values.Name',
+                        };
+                        delete newConfig[key];
+                      }
+                      setActionForm({ ...actionForm, mapping: newMapping, config: newConfig });
+                    };
+
+                    const updateTransformProp = (prop, val) => {
+                      const curObj = typeof currentVal === 'object' && currentVal ? { ...currentVal } : { transform: 'trim' };
+                      curObj[prop] = val;
+                      setActionForm({
+                        ...actionForm,
+                        mapping: { ...actionForm.mapping, [key]: curObj }
+                      });
+                    };
+
+                    return (
+                      <div
+                        key={key}
+                        style={{
+                          marginBottom: '14px',
+                          padding: '12px',
+                          backgroundColor: 'var(--surface-1)',
+                          borderRadius: '8px',
+                          border: '1px solid var(--border)',
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                          <label style={{ fontSize: '13px', fontWeight: 600, margin: 0 }}>
+                            {field.label || key} {field.required ? <span style={{ color: 'var(--error)' }}>*</span> : ''}
+                          </label>
+
+                          {/* Mode Tabs */}
+                          <div style={{ display: 'inline-flex', backgroundColor: 'var(--surface-0)', borderRadius: '6px', padding: '2px', border: '1px solid var(--border)' }}>
+                            <button
+                              type="button"
+                              onClick={() => setFieldMode('static')}
+                              style={{
+                                border: 'none',
+                                background: mode === 'static' ? 'var(--primary-btn-bg)' : 'transparent',
+                                color: mode === 'static' ? '#fff' : 'var(--text-secondary)',
+                                padding: '3px 8px',
+                                borderRadius: '4px',
+                                fontSize: '11px',
+                                cursor: 'pointer',
+                                fontWeight: mode === 'static' ? 600 : 400,
+                              }}
+                            >
+                              Static
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setFieldMode('direct')}
+                              style={{
+                                border: 'none',
+                                background: mode === 'direct' ? 'var(--primary-btn-bg)' : 'transparent',
+                                color: mode === 'direct' ? '#fff' : 'var(--text-secondary)',
+                                padding: '3px 8px',
+                                borderRadius: '4px',
+                                fontSize: '11px',
+                                cursor: 'pointer',
+                                fontWeight: mode === 'direct' ? 600 : 400,
+                              }}
+                            >
+                              Variable
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setFieldMode('template')}
+                              style={{
+                                border: 'none',
+                                background: mode === 'template' ? 'var(--primary-btn-bg)' : 'transparent',
+                                color: mode === 'template' ? '#fff' : 'var(--text-secondary)',
+                                padding: '3px 8px',
+                                borderRadius: '4px',
+                                fontSize: '11px',
+                                cursor: 'pointer',
+                                fontWeight: mode === 'template' ? 600 : 400,
+                              }}
+                            >
+                              Template
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setFieldMode('transform')}
+                              style={{
+                                border: 'none',
+                                background: mode === 'transform' ? 'var(--primary-btn-bg)' : 'transparent',
+                                color: mode === 'transform' ? '#fff' : 'var(--text-secondary)',
+                                padding: '3px 8px',
+                                borderRadius: '4px',
+                                fontSize: '11px',
+                                cursor: 'pointer',
+                                fontWeight: mode === 'transform' ? 600 : 400,
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '3px',
+                              }}
+                            >
+                              <Wand2 size={10} /> Transform
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* MODE 1: Static Literal */}
+                        {mode === 'static' && (
                           <input
                             type={field.type === 'number' ? 'number' : 'text'}
-                            value={actionForm.config?.[key] || ''}
-                            onChange={(e) => setActionForm({ ...actionForm, config: { ...actionForm.config, [key]: e.target.value } })}
-                            placeholder={field.description || 'Enter value...'}
-                            style={{ width: '100%', minWidth: 0, padding: '8px', borderRadius: '4px', border: '1px solid var(--border)', backgroundColor: 'var(--surface-0)', color: 'var(--text-primary)' }}
+                            value={actionForm.config?.[key] ?? ''}
+                            onChange={(e) => setActionForm({
+                              ...actionForm,
+                              config: { ...actionForm.config, [key]: e.target.value }
+                            })}
+                            placeholder={field.description || 'Enter static value...'}
+                            style={{ width: '100%', padding: '7px 10px', borderRadius: '4px', border: '1px solid var(--border)', backgroundColor: 'var(--surface-0)', color: 'var(--text-primary)', fontSize: '13px' }}
                           />
                         )}
-                        {actionForm.mapping?.[key] && (
-                          <div style={{ width: '100%', minWidth: 0, padding: '8px', backgroundColor: 'var(--surface-1)', color: 'var(--text-secondary)', borderRadius: '4px', border: '1px solid var(--border)', fontStyle: 'italic', fontSize: '13px' }}>
-                            Mapped to {actionForm.mapping[key]}
+
+                        {/* MODE 2: Direct Variable Reference */}
+                        {mode === 'direct' && (
+                          <select
+                            value={typeof currentVal === 'string' ? currentVal : ''}
+                            onChange={(e) => {
+                              setActionForm({
+                                ...actionForm,
+                                mapping: { ...actionForm.mapping, [key]: e.target.value }
+                              });
+                            }}
+                            style={{ width: '100%', padding: '7px 10px', borderRadius: '4px', border: '1px solid var(--border)', backgroundColor: 'var(--surface-0)', color: 'var(--text-primary)', fontSize: '13px' }}
+                          >
+                            <optgroup label="Trigger Variables">
+                              {availableVars.filter(v => v.group === 'Trigger Data').map(v => (
+                                <option key={v.path} value={v.path}>{v.label} ({v.path})</option>
+                              ))}
+                            </optgroup>
+                            {availableVars.some(v => v.group === 'Preceding Steps') && (
+                              <optgroup label="Preceding Steps Outputs">
+                                {availableVars.filter(v => v.group === 'Preceding Steps').map(v => (
+                                  <option key={v.path} value={v.path}>{v.label} ({v.path})</option>
+                                ))}
+                              </optgroup>
+                            )}
+                          </select>
+                        )}
+
+                        {/* MODE 3: Template String Interpolation */}
+                        {mode === 'template' && (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                            <input
+                              type="text"
+                              value={typeof currentVal === 'string' ? currentVal : ''}
+                              onChange={(e) => setActionForm({
+                                ...actionForm,
+                                mapping: { ...actionForm.mapping, [key]: e.target.value }
+                              })}
+                              placeholder="e.g. Dear {{trigger.values.FirstName}} {{trigger.values.LastName}}"
+                              style={{ width: '100%', padding: '7px 10px', borderRadius: '4px', border: '1px solid var(--border)', backgroundColor: 'var(--surface-0)', color: 'var(--text-primary)', fontSize: '13px', fontFamily: 'monospace' }}
+                            />
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap' }}>
+                              <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Quick insert:</span>
+                              {availableVars.slice(0, 4).map(v => (
+                                <button
+                                  key={v.path}
+                                  type="button"
+                                  onClick={() => {
+                                    const prev = typeof currentVal === 'string' ? currentVal : '';
+                                    setActionForm({
+                                      ...actionForm,
+                                      mapping: { ...actionForm.mapping, [key]: `${prev} {{${v.path}}}`.trim() }
+                                    });
+                                  }}
+                                  style={{
+                                    border: '1px solid var(--border)',
+                                    backgroundColor: 'var(--surface-0)',
+                                    color: 'var(--text-primary)',
+                                    fontSize: '10px',
+                                    padding: '2px 6px',
+                                    borderRadius: '4px',
+                                    cursor: 'pointer'
+                                  }}
+                                >
+                                  +{v.path.split('.').pop()}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* MODE 4: Structured Transformation */}
+                        {mode === 'transform' && (() => {
+                          const tfDef = typeof currentVal === 'object' && currentVal ? currentVal : { transform: 'trim' };
+                          const tfType = tfDef.transform || 'trim';
+
+                          return (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', backgroundColor: 'var(--surface-0)', padding: '10px', borderRadius: '6px', border: '1px solid var(--border)' }}>
+                              <div>
+                                <label style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '3px', display: 'block' }}>Transformation Type</label>
+                                <select
+                                  value={tfType}
+                                  onChange={(e) => {
+                                    const nextType = e.target.value;
+                                    const nextObj = { transform: nextType };
+                                    if (nextType === 'concat') {
+                                      nextObj.sources = [availableVars[0]?.path || 'trigger.values.Name', ' '];
+                                      nextObj.separator = '';
+                                    } else if (nextType === 'replace') {
+                                      nextObj.source = availableVars[0]?.path || 'trigger.values.Name';
+                                      nextObj.find = '';
+                                      nextObj.replace_with = '';
+                                    } else if (nextType === 'substring') {
+                                      nextObj.source = availableVars[0]?.path || 'trigger.values.Name';
+                                      nextObj.start = 0;
+                                      nextObj.length = 5;
+                                    } else if (nextType === 'default_value') {
+                                      nextObj.source = availableVars[0]?.path || 'trigger.values.Name';
+                                      nextObj.default = 'N/A';
+                                    } else if (nextType === 'format_date') {
+                                      nextObj.source = availableVars[0]?.path || 'trigger.created_at';
+                                      nextObj.output_format = '%Y-%m-%d';
+                                    } else {
+                                      nextObj.source = availableVars[0]?.path || 'trigger.values.Name';
+                                    }
+                                    setActionForm({
+                                      ...actionForm,
+                                      mapping: { ...actionForm.mapping, [key]: nextObj }
+                                    });
+                                  }}
+                                  style={{ width: '100%', padding: '6px 8px', borderRadius: '4px', border: '1px solid var(--border)', backgroundColor: 'var(--surface-1)', color: 'var(--text-primary)', fontSize: '12px' }}
+                                >
+                                  {(transformCatalog.length > 0 ? transformCatalog : [
+                                    { type: 'concat', name: 'Concatenate Strings' },
+                                    { type: 'trim', name: 'Trim Whitespace' },
+                                    { type: 'uppercase', name: 'Uppercase Text' },
+                                    { type: 'lowercase', name: 'Lowercase Text' },
+                                    { type: 'titlecase', name: 'Title Case / Capitalize' },
+                                    { type: 'replace', name: 'Replace Substring' },
+                                    { type: 'substring', name: 'Extract Substring' },
+                                    { type: 'default_value', name: 'Default Fallback Value' },
+                                    { type: 'to_string', name: 'Convert to String' },
+                                    { type: 'to_number', name: 'Convert to Number (Float)' },
+                                    { type: 'to_integer', name: 'Convert to Integer' },
+                                    { type: 'to_boolean', name: 'Convert to Boolean' },
+                                    { type: 'format_date', name: 'Format Date & Time' },
+                                  ]).map(item => (
+                                    <option key={item.type} value={item.type}>{item.name} ({item.type})</option>
+                                  ))}
+                                </select>
+                              </div>
+
+                              {/* Parameters for Concat */}
+                              {tfType === 'concat' && (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                  <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Sources to join</label>
+                                  {(tfDef.sources || []).map((srcItem, sIdx) => (
+                                    <div key={sIdx} style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                                      <input
+                                        type="text"
+                                        value={srcItem}
+                                        onChange={(e) => {
+                                          const nextSources = [...(tfDef.sources || [])];
+                                          nextSources[sIdx] = e.target.value;
+                                          updateTransformProp('sources', nextSources);
+                                        }}
+                                        placeholder="Path (trigger.x) or literal text"
+                                        style={{ flex: 1, padding: '5px 8px', borderRadius: '4px', border: '1px solid var(--border)', backgroundColor: 'var(--surface-1)', color: 'var(--text-primary)', fontSize: '12px', fontFamily: 'monospace' }}
+                                      />
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          const nextSources = (tfDef.sources || []).filter((_, idx) => idx !== sIdx);
+                                          updateTransformProp('sources', nextSources);
+                                        }}
+                                        style={{ border: 'none', background: 'transparent', color: 'var(--error)', cursor: 'pointer', padding: '4px' }}
+                                      >
+                                        <Trash2 size={13} />
+                                      </button>
+                                    </div>
+                                  ))}
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px' }}>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const nextSources = [...(tfDef.sources || []), availableVars[0]?.path || ' '];
+                                        updateTransformProp('sources', nextSources);
+                                      }}
+                                      style={{ border: '1px dashed var(--border)', backgroundColor: 'transparent', color: 'var(--primary-btn-bg)', fontSize: '11px', padding: '3px 8px', borderRadius: '4px', cursor: 'pointer' }}
+                                    >
+                                      + Add Source
+                                    </button>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                      <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Separator:</span>
+                                      <input
+                                        type="text"
+                                        value={tfDef.separator || ''}
+                                        onChange={(e) => updateTransformProp('separator', e.target.value)}
+                                        placeholder="e.g. ' '"
+                                        style={{ width: '60px', padding: '3px 6px', borderRadius: '4px', border: '1px solid var(--border)', backgroundColor: 'var(--surface-1)', color: 'var(--text-primary)', fontSize: '11px' }}
+                                      />
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* Parameters for Replace */}
+                              {tfType === 'replace' && (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                  <div>
+                                    <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Source Field</label>
+                                    <input
+                                      type="text"
+                                      value={tfDef.source || ''}
+                                      onChange={(e) => updateTransformProp('source', e.target.value)}
+                                      placeholder="e.g. trigger.values.Phone"
+                                      style={{ width: '100%', padding: '5px 8px', borderRadius: '4px', border: '1px solid var(--border)', backgroundColor: 'var(--surface-1)', color: 'var(--text-primary)', fontSize: '12px', fontFamily: 'monospace' }}
+                                    />
+                                  </div>
+                                  <div style={{ display: 'flex', gap: '6px' }}>
+                                    <div style={{ flex: 1 }}>
+                                      <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Find</label>
+                                      <input
+                                        type="text"
+                                        value={tfDef.find || ''}
+                                        onChange={(e) => updateTransformProp('find', e.target.value)}
+                                        placeholder="Search substring"
+                                        style={{ width: '100%', padding: '5px 8px', borderRadius: '4px', border: '1px solid var(--border)', backgroundColor: 'var(--surface-1)', color: 'var(--text-primary)', fontSize: '12px' }}
+                                      />
+                                    </div>
+                                    <div style={{ flex: 1 }}>
+                                      <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Replace with</label>
+                                      <input
+                                        type="text"
+                                        value={tfDef.replace_with || ''}
+                                        onChange={(e) => updateTransformProp('replace_with', e.target.value)}
+                                        placeholder="New text"
+                                        style={{ width: '100%', padding: '5px 8px', borderRadius: '4px', border: '1px solid var(--border)', backgroundColor: 'var(--surface-1)', color: 'var(--text-primary)', fontSize: '12px' }}
+                                      />
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* Parameters for Substring */}
+                              {tfType === 'substring' && (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                  <div>
+                                    <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Source Field</label>
+                                    <input
+                                      type="text"
+                                      value={tfDef.source || ''}
+                                      onChange={(e) => updateTransformProp('source', e.target.value)}
+                                      placeholder="e.g. trigger.values.Code"
+                                      style={{ width: '100%', padding: '5px 8px', borderRadius: '4px', border: '1px solid var(--border)', backgroundColor: 'var(--surface-1)', color: 'var(--text-primary)', fontSize: '12px', fontFamily: 'monospace' }}
+                                    />
+                                  </div>
+                                  <div style={{ display: 'flex', gap: '6px' }}>
+                                    <div style={{ flex: 1 }}>
+                                      <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Start Index</label>
+                                      <input
+                                        type="number"
+                                        value={tfDef.start ?? 0}
+                                        onChange={(e) => updateTransformProp('start', parseInt(e.target.value) || 0)}
+                                        style={{ width: '100%', padding: '5px 8px', borderRadius: '4px', border: '1px solid var(--border)', backgroundColor: 'var(--surface-1)', color: 'var(--text-primary)', fontSize: '12px' }}
+                                      />
+                                    </div>
+                                    <div style={{ flex: 1 }}>
+                                      <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Length / End</label>
+                                      <input
+                                        type="number"
+                                        value={tfDef.length ?? ''}
+                                        onChange={(e) => updateTransformProp('length', e.target.value === '' ? undefined : parseInt(e.target.value))}
+                                        placeholder="Length"
+                                        style={{ width: '100%', padding: '5px 8px', borderRadius: '4px', border: '1px solid var(--border)', backgroundColor: 'var(--surface-1)', color: 'var(--text-primary)', fontSize: '12px' }}
+                                      />
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* Parameters for Default Value */}
+                              {tfType === 'default_value' && (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                  <div>
+                                    <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Source Field</label>
+                                    <input
+                                      type="text"
+                                      value={tfDef.source || ''}
+                                      onChange={(e) => updateTransformProp('source', e.target.value)}
+                                      placeholder="e.g. trigger.values.Phone"
+                                      style={{ width: '100%', padding: '5px 8px', borderRadius: '4px', border: '1px solid var(--border)', backgroundColor: 'var(--surface-1)', color: 'var(--text-primary)', fontSize: '12px', fontFamily: 'monospace' }}
+                                    />
+                                  </div>
+                                  <div>
+                                    <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Fallback Default Value</label>
+                                    <input
+                                      type="text"
+                                      value={tfDef.default ?? ''}
+                                      onChange={(e) => updateTransformProp('default', e.target.value)}
+                                      placeholder="e.g. N/A or Unknown"
+                                      style={{ width: '100%', padding: '5px 8px', borderRadius: '4px', border: '1px solid var(--border)', backgroundColor: 'var(--surface-1)', color: 'var(--text-primary)', fontSize: '12px' }}
+                                    />
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* Parameters for Format Date */}
+                              {tfType === 'format_date' && (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                  <div>
+                                    <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Source Date Field</label>
+                                    <input
+                                      type="text"
+                                      value={tfDef.source || ''}
+                                      onChange={(e) => updateTransformProp('source', e.target.value)}
+                                      placeholder="e.g. trigger.created_at"
+                                      style={{ width: '100%', padding: '5px 8px', borderRadius: '4px', border: '1px solid var(--border)', backgroundColor: 'var(--surface-1)', color: 'var(--text-primary)', fontSize: '12px', fontFamily: 'monospace' }}
+                                    />
+                                  </div>
+                                  <div>
+                                    <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Output Format</label>
+                                    <select
+                                      value={tfDef.output_format || '%Y-%m-%d'}
+                                      onChange={(e) => updateTransformProp('output_format', e.target.value)}
+                                      style={{ width: '100%', padding: '5px 8px', borderRadius: '4px', border: '1px solid var(--border)', backgroundColor: 'var(--surface-1)', color: 'var(--text-primary)', fontSize: '12px' }}
+                                    >
+                                      <option value="%Y-%m-%d">YYYY-MM-DD (2026-10-12)</option>
+                                      <option value="%d-%m-%Y">DD-MM-YYYY (12-10-2026)</option>
+                                      <option value="%d/%m/%Y">DD/MM/YYYY (12/10/2026)</option>
+                                      <option value="%m/%d/%Y">MM/DD/YYYY (10/12/2026)</option>
+                                      <option value="%B %d, %Y">Month D, YYYY (October 12, 2026)</option>
+                                      <option value="%Y-%m-%d %H:%M:%S">Timestamp (2026-10-12 14:30:00)</option>
+                                    </select>
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* Parameters for General Single-Source Transforms */}
+                              {!['concat', 'replace', 'substring', 'default_value', 'format_date'].includes(tfType) && (
+                                <div>
+                                  <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Source Field</label>
+                                  <input
+                                    type="text"
+                                    value={tfDef.source || ''}
+                                    onChange={(e) => updateTransformProp('source', e.target.value)}
+                                    placeholder="e.g. trigger.values.Email"
+                                    style={{ width: '100%', padding: '5px 8px', borderRadius: '4px', border: '1px solid var(--border)', backgroundColor: 'var(--surface-1)', color: 'var(--text-primary)', fontSize: '12px', fontFamily: 'monospace' }}
+                                  />
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()}
+                      </div>
+                    );
+                  })}
+
+                  {/* Interactive Mapping Preview Drawer / Section */}
+                  <div style={{ marginTop: '20px', borderTop: '1px solid var(--border)', paddingTop: '16px' }}>
+                    <button
+                      type="button"
+                      onClick={() => setShowPreviewSection(!showPreviewSection)}
+                      style={{
+                        width: '100%',
+                        padding: '10px 14px',
+                        backgroundColor: showPreviewSection ? 'var(--surface-3)' : 'var(--surface-1)',
+                        border: '1px solid var(--border)',
+                        borderRadius: '6px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        cursor: 'pointer',
+                        color: 'var(--text-primary)',
+                        fontWeight: 600,
+                        fontSize: '12px',
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <Wand2 size={14} style={{ color: 'var(--primary-btn-bg)' }} />
+                        <span>Interactive Mapping Preview (Module 8)</span>
+                      </div>
+                      {showPreviewSection ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                    </button>
+
+                    {showPreviewSection && (
+                      <div style={{ marginTop: '12px', padding: '12px', backgroundColor: 'var(--surface-1)', borderRadius: '6px', border: '1px solid var(--border)' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                          <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-primary)' }}>Sample Execution Context</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setPreviewContextJson(JSON.stringify({
+                                trigger: {
+                                  values: {
+                                    FirstName: "Aarav",
+                                    LastName: "Sharma",
+                                    Email: "AARAV.SHARMA@ENTERPRISE.IN",
+                                    Phone: "+91-98765-43210",
+                                    Amount: "$4,500.00",
+                                    Status: "active",
+                                    JoinedDate: "2026-10-12T09:30:00Z"
+                                  }
+                                }
+                              }, null, 2));
+                            }}
+                            style={{ background: 'transparent', border: 'none', color: 'var(--primary-btn-bg)', fontSize: '11px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}
+                          >
+                            <RefreshCw size={11} /> Reset Sample
+                          </button>
+                        </div>
+
+                        <textarea
+                          rows={6}
+                          value={previewContextJson}
+                          onChange={(e) => setPreviewContextJson(e.target.value)}
+                          style={{
+                            width: '100%',
+                            padding: '8px',
+                            fontFamily: 'monospace',
+                            fontSize: '11px',
+                            borderRadius: '4px',
+                            border: '1px solid var(--border)',
+                            backgroundColor: 'var(--surface-0)',
+                            color: 'var(--text-primary)',
+                            marginBottom: '10px',
+                            resize: 'vertical',
+                          }}
+                        />
+
+                        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '10px' }}>
+                          <button
+                            type="button"
+                            onClick={handleRunMappingPreview}
+                            disabled={previewLoading}
+                            className="btn-primary"
+                            style={{ padding: '6px 14px', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}
+                          >
+                            <PlayCircle size={14} />
+                            {previewLoading ? 'Evaluating...' : 'Run Preview Test'}
+                          </button>
+                        </div>
+
+                        {previewError && (
+                          <div style={{ padding: '8px 12px', borderRadius: '4px', backgroundColor: '#FEE2E2', color: '#991B1B', fontSize: '12px', marginBottom: '10px' }}>
+                            {previewError}
+                          </div>
+                        )}
+
+                        {previewResult && (
+                          <div style={{ marginTop: '10px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                              <span style={{ fontSize: '12px', fontWeight: 600 }}>Resolved Action Output:</span>
+                              <span className={`status-pill ${previewResult.success ? 'success' : 'neutral'}`} style={{ fontSize: '10px' }}>
+                                {previewResult.success ? `${previewResult.fields_evaluated} fields evaluated` : 'Evaluation errors'}
+                              </span>
+                            </div>
+
+                            <div style={{ maxHeight: '180px', overflowY: 'auto', backgroundColor: 'var(--surface-0)', borderRadius: '4px', border: '1px solid var(--border)', padding: '8px' }}>
+                              {Object.entries(previewResult.output || {}).length === 0 ? (
+                                <div style={{ fontSize: '12px', color: 'var(--text-muted)', fontStyle: 'italic', textAlign: 'center', padding: '12px' }}>
+                                  No fields mapped yet. Configure fields above to test preview.
+                                </div>
+                              ) : (
+                                Object.entries(previewResult.output).map(([outKey, outVal]) => (
+                                  <div key={outKey} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 0', borderBottom: '1px solid var(--border-subtle)', fontSize: '12px' }}>
+                                    <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{outKey}:</span>
+                                    <span style={{ fontFamily: 'monospace', backgroundColor: 'var(--surface-2)', padding: '2px 6px', borderRadius: '4px', color: 'var(--text-primary)', maxWidth: '240px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                      {outVal === null ? 'null' : (typeof outVal === 'object' ? JSON.stringify(outVal) : String(outVal))}
+                                    </span>
+                                  </div>
+                                ))
+                              )}
+                            </div>
                           </div>
                         )}
                       </div>
-                    </div>
-                  ))}
+                    )}
+                  </div>
                 </div>
               );
             })()}

@@ -9,8 +9,11 @@ import {
   Moon,
   LogOut,
   User,
-  CheckCircle
+  CheckCircle,
+  Bell,
+  Trash2
 } from 'lucide-react';
+
 
 export default function Header({
   activeTab,
@@ -26,12 +29,19 @@ export default function Header({
   theme,
   onToggleTheme,
   onRefresh,
-  isRefreshing
+  isRefreshing,
+  unreadNotificationsCount = 0,
+  notifications = [],
+  onMarkNotificationRead,
+  onMarkAllNotificationsRead,
+  onDeleteNotification
 }) {
   const [orgDropdownOpen, setOrgDropdownOpen] = useState(false);
   const [userDropdownOpen, setUserDropdownOpen] = useState(false);
+  const [notifDropdownOpen, setNotifDropdownOpen] = useState(false);
   const [newOrgName, setNewOrgName] = useState('');
   const [creatingOrg, setCreatingOrg] = useState(false);
+
 
   const handleCreateOrg = async (e) => {
     e.preventDefault();
@@ -205,12 +215,14 @@ export default function Header({
         {/* Center: Navigation tabs in sentence case */}
         <nav style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
           {[
+            { id: 'dashboard', label: 'Dashboard' },
             { id: 'templates', label: 'Templates' },
             { id: 'workflows', label: 'Workflows' },
             { id: 'executions', label: 'Executions' },
             { id: 'connected', label: 'Connected apps', count: connectionsCount },
             { id: 'catalog', label: 'App catalog' },
             { id: 'team', label: 'Team & workspace', count: membersCount },
+            { id: 'billing', label: 'Billing & plans' },
           ].map((tab) => {
             const isActive = activeTab === tab.id;
             return (
@@ -249,8 +261,219 @@ export default function Header({
           })}
         </nav>
 
-        {/* Right: Theme Toggle + User Dropdown + Refresh */}
+        {/* Right: Notification Bell + Theme Toggle + User Dropdown + Refresh */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          {/* Notification Bell with unread counter */}
+          <div style={{ position: 'relative' }}>
+            <button
+              onClick={() => setNotifDropdownOpen(!notifDropdownOpen)}
+              className="btn-secondary"
+              title="Notifications & failure alerts"
+              style={{
+                padding: '7px',
+                position: 'relative',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <Bell size={15} style={{ color: unreadNotificationsCount > 0 ? 'var(--status-warning-text)' : 'var(--text-secondary)' }} />
+              {unreadNotificationsCount > 0 && (
+                <span style={{
+                  position: 'absolute',
+                  top: '-3px',
+                  right: '-3px',
+                  backgroundColor: '#EF4444',
+                  color: '#FFFFFF',
+                  fontSize: '10px',
+                  fontWeight: 600,
+                  borderRadius: '9999px',
+                  padding: '1px 5px',
+                  minWidth: '16px',
+                  textAlign: 'center',
+                  lineHeight: '1.2',
+                }}>
+                  {unreadNotificationsCount}
+                </span>
+              )}
+            </button>
+
+            {/* Notification Popover Dropdown */}
+            {notifDropdownOpen && (
+              <div style={{
+                position: 'absolute',
+                top: 'calc(100% + 8px)',
+                right: 0,
+                width: '360px',
+                maxHeight: '440px',
+                backgroundColor: 'var(--surface-2)',
+                border: '1px solid var(--border)',
+                borderRadius: '12px',
+                boxShadow: '0 8px 24px rgba(0, 0, 0, 0.12)',
+                zIndex: 100,
+                display: 'flex',
+                flexDirection: 'column',
+                overflow: 'hidden',
+              }}>
+                <div style={{
+                  padding: '12px 16px',
+                  borderBottom: '1px solid var(--border)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>
+                      Failure Alerts & Notifications
+                    </span>
+                    {unreadNotificationsCount > 0 && (
+                      <span style={{
+                        fontSize: '11px',
+                        padding: '1px 6px',
+                        borderRadius: '9999px',
+                        backgroundColor: 'var(--status-warning-bg)',
+                        color: 'var(--status-warning-text)',
+                        fontWeight: 600,
+                      }}>
+                        {unreadNotificationsCount} unread
+                      </span>
+                    )}
+                  </div>
+                  {unreadNotificationsCount > 0 && onMarkAllNotificationsRead && (
+                    <button
+                      onClick={onMarkAllNotificationsRead}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        color: 'var(--text-muted)',
+                        fontSize: '11px',
+                        cursor: 'pointer',
+                        padding: 0,
+                      }}
+                    >
+                      Mark all read
+                    </button>
+                  )}
+                </div>
+
+                <div style={{ overflowY: 'auto', maxHeight: '340px', padding: '8px' }}>
+                  {notifications.length === 0 ? (
+                    <div style={{ padding: '24px 16px', textAlign: 'center', color: 'var(--text-secondary)', fontSize: '13px' }}>
+                      <CheckCircle size={20} style={{ color: 'var(--status-success-text)', margin: '0 auto 8px auto', display: 'block' }} />
+                      No active alerts. All automations are healthy!
+                    </div>
+                  ) : (
+                    notifications.map((n) => (
+                      <div
+                        key={n.id}
+                        style={{
+                          padding: '10px 12px',
+                          borderRadius: '8px',
+                          backgroundColor: n.is_read ? 'transparent' : 'var(--surface-0)',
+                          border: '1px solid var(--border)',
+                          marginBottom: '6px',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '6px',
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '8px' }}>
+                          <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-primary)' }}>
+                            {n.title}
+                          </span>
+                          <span style={{
+                            fontSize: '10px',
+                            padding: '1px 5px',
+                            borderRadius: '4px',
+                            backgroundColor: n.severity === 'critical' ? 'var(--status-warning-bg)' : 'var(--surface-2)',
+                            color: n.severity === 'critical' ? 'var(--status-warning-text)' : 'var(--text-secondary)',
+                            fontWeight: 600,
+                          }}>
+                            {n.severity.toUpperCase()}
+                          </span>
+                        </div>
+
+                        <p style={{
+                          fontSize: '11px',
+                          color: 'var(--text-secondary)',
+                          margin: 0,
+                          lineHeight: '1.4',
+                          whiteSpace: 'pre-wrap',
+                          maxHeight: '60px',
+                          overflow: 'hidden',
+                        }}>
+                          {n.message}
+                        </p>
+
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: '4px' }}>
+                          <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
+                            {new Date(n.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                          <div style={{ display: 'flex', gap: '6px' }}>
+                            {!n.is_read && onMarkNotificationRead && (
+                              <button
+                                onClick={() => onMarkNotificationRead(n.id)}
+                                style={{
+                                  background: 'none',
+                                  border: 'none',
+                                  color: 'var(--primary-btn-bg)',
+                                  fontSize: '11px',
+                                  cursor: 'pointer',
+                                  padding: 0,
+                                }}
+                              >
+                                Mark read
+                              </button>
+                            )}
+                            {onDeleteNotification && (
+                              <button
+                                onClick={() => onDeleteNotification(n.id)}
+                                title="Dismiss notification"
+                                style={{
+                                  background: 'none',
+                                  border: 'none',
+                                  color: 'var(--text-muted)',
+                                  cursor: 'pointer',
+                                  padding: 0,
+                                }}
+                              >
+                                <Trash2 size={11} />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                <div style={{
+                  padding: '8px 16px',
+                  borderTop: '1px solid var(--border)',
+                  backgroundColor: 'var(--surface-0)',
+                  textAlign: 'center',
+                }}>
+                  <button
+                    onClick={() => {
+                      setActiveTab('dashboard');
+                      setNotifDropdownOpen(false);
+                    }}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: 'var(--primary-btn-bg)',
+                      fontSize: '12px',
+                      fontWeight: 500,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    View in Monitoring Dashboard →
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* Theme mode toggle */}
           <button
             onClick={onToggleTheme}

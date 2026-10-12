@@ -1,11 +1,13 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import Header from './components/Header';
+import MonitoringDashboard from './components/MonitoringDashboard';
 import WorkflowsView from './components/WorkflowsView';
 import TemplatesView from './components/TemplatesView';
 import ExecutionsView from './components/ExecutionsView';
 import ConnectedApps from './components/ConnectedApps';
 import ConnectorCatalog from './components/ConnectorCatalog';
 import TeamWorkspaceView from './components/TeamWorkspaceView';
+import BillingView from './components/BillingView';
 import ConnectModal from './components/ConnectModal';
 import InviteModal from './components/InviteModal';
 import AuthView from './components/AuthView';
@@ -25,14 +27,17 @@ export default function App() {
   const [currentOrg, setCurrentOrg] = useState(null);
   const [members, setMembers] = useState([]);
   const [pendingInvitations, setPendingInvitations] = useState([]);
+  const [notifications, setNotifications] = useState([]);
+  const [unreadNotificationsCount, setUnreadNotificationsCount] = useState(0);
 
-  const [activeTab, setActiveTab] = useState('templates');
+  const [activeTab, setActiveTab] = useState('dashboard');
   const [selectedConnector, setSelectedConnector] = useState(null);
   const [editingConnection, setEditingConnection] = useState(null);
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [loading, setLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [toast, setToast] = useState(null);
+
 
   // Apply theme to document element
   useEffect(() => {
@@ -82,23 +87,31 @@ export default function App() {
       let connectionsList = [];
 
       if (orgIdToLoad) {
-        const [orgData, membersData, connData] = await Promise.all([
+        const [orgData, membersData, connData, notifsData, unreadData] = await Promise.all([
           api.fetchCurrentOrganization(orgIdToLoad).catch(() => null),
           api.fetchMembers(orgIdToLoad).catch(() => []),
           api.fetchConnections(orgIdToLoad).catch(() => []),
+          api.fetchNotifications(null, 20, orgIdToLoad).catch(() => ({ items: [] })),
+          api.fetchUnreadNotificationCount(orgIdToLoad).catch(() => ({ unread_count: 0 })),
         ]);
         activeOrg = orgData;
         memberList = membersData || [];
         connectionsList = connData || [];
+        setNotifications(notifsData?.items || []);
+        setUnreadNotificationsCount(unreadData?.unread_count || 0);
       } else {
-        const [orgData, membersData, connData] = await Promise.all([
+        const [orgData, membersData, connData, notifsData, unreadData] = await Promise.all([
           api.fetchCurrentOrganization().catch(() => null),
           api.fetchMembers().catch(() => []),
           api.fetchConnections().catch(() => []),
+          api.fetchNotifications(null, 20).catch(() => ({ items: [] })),
+          api.fetchUnreadNotificationCount().catch(() => ({ unread_count: 0 })),
         ]);
         activeOrg = orgData;
         memberList = membersData || [];
         connectionsList = connData || [];
+        setNotifications(notifsData?.items || []);
+        setUnreadNotificationsCount(unreadData?.unread_count || 0);
       }
 
       setCurrentOrg(activeOrg);
@@ -110,6 +123,7 @@ export default function App() {
       setLoading(false);
       setIsRefreshing(false);
     }
+
   }, []);
 
   useEffect(() => {
@@ -239,8 +253,43 @@ export default function App() {
     }
   };
 
+  const handleMarkNotificationRead = async (id) => {
+    try {
+      await api.markNotificationRead(id, currentOrg?.id);
+      setNotifications((prev) =>
+        prev.map((n) => (n.id === id ? { ...n, is_read: true } : n))
+      );
+      setUnreadNotificationsCount((prev) => Math.max(0, prev - 1));
+    } catch (err) {
+      showToast(err.message || 'Failed to mark notification as read', 'error');
+    }
+  };
+
+  const handleMarkAllNotificationsRead = async () => {
+    try {
+      await api.markAllNotificationsRead(currentOrg?.id);
+      setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
+      setUnreadNotificationsCount(0);
+      showToast('All alerts marked as read');
+    } catch (err) {
+      showToast(err.message || 'Failed to mark all as read', 'error');
+    }
+  };
+
+  const handleDeleteNotification = async (id) => {
+    try {
+      await api.deleteNotification(id, currentOrg?.id);
+      setNotifications((prev) => prev.filter((n) => n.id !== id));
+      setUnreadNotificationsCount((prev) => Math.max(0, prev - 1));
+      showToast('Notification dismissed');
+    } catch (err) {
+      showToast(err.message || 'Failed to dismiss notification', 'error');
+    }
+  };
+
   const connectedSlugs = connections.map((c) => c.connector_slug);
   const canManageConnectors = currentOrg?.role !== 'Viewer';
+
 
   if (loading) {
     return (
@@ -283,6 +332,11 @@ export default function App() {
         onToggleTheme={toggleTheme}
         onRefresh={handleRefresh}
         isRefreshing={isRefreshing}
+        unreadNotificationsCount={unreadNotificationsCount}
+        notifications={notifications}
+        onMarkNotificationRead={handleMarkNotificationRead}
+        onMarkAllNotificationsRead={handleMarkAllNotificationsRead}
+        onDeleteNotification={handleDeleteNotification}
       />
 
       <main className="main-content">
@@ -323,7 +377,17 @@ export default function App() {
           </div>
         )}
 
+        {activeTab === 'dashboard' && (
+          <MonitoringDashboard
+            currentOrg={currentOrg}
+            onNavigateWorkflows={() => setActiveTab('workflows')}
+            onNavigateExecutions={() => setActiveTab('executions')}
+            onOpenNotifications={() => setActiveTab('dashboard')}
+          />
+        )}
+
         {activeTab === 'templates' && (
+
           <TemplatesView
             connections={connections}
             onNavigateWorkflows={() => setActiveTab('workflows')}
@@ -335,6 +399,7 @@ export default function App() {
           <WorkflowsView
             onNavigateConnectors={() => setActiveTab('connected')}
             onNavigateExecutions={() => setActiveTab('executions')}
+            onNavigateBilling={() => setActiveTab('billing')}
           />
         )}
 
@@ -380,6 +445,14 @@ export default function App() {
             onUpdateRole={handleUpdateRole}
             onAcceptInvitation={handleAcceptInvitation}
             currentUser={currentUser}
+          />
+        )}
+
+        {activeTab === 'billing' && (
+          <BillingView
+            currentOrg={currentOrg}
+            currentUser={currentUser}
+            onNavigateWorkflows={() => setActiveTab('workflows')}
           />
         )}
       </main>

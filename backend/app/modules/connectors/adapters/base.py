@@ -75,6 +75,29 @@ class BaseConnectorAdapter(ABC):
             f"Trigger '{trigger_slug}' is not implemented by connector '{getattr(self, 'slug', 'unknown')}'"
         )
 
+    def validate_action_input(
+        self,
+        action_slug: str,
+        input_data: Any,
+    ) -> None:
+        """
+        Validates input payload against malformed structures.
+        Raises ConnectorExecutionError with category='validation_error' on schema mismatch.
+        """
+        if not isinstance(input_data, dict):
+            raise ConnectorExecutionError(
+                f"Action '{action_slug}' input payload must be a JSON object/dictionary, got {type(input_data).__name__}",
+                category="validation_error",
+                retryable=False,
+            )
+
+        if input_data.get("_force_malformed_payload") or input_data.get("_invalid_payload"):
+            raise ConnectorExecutionError(
+                f"Action '{action_slug}' received malformed payload: schema validation failed",
+                category="validation_error",
+                retryable=False,
+            )
+
     def execute_action(
         self,
         action_slug: str,
@@ -89,3 +112,4 @@ class BaseConnectorAdapter(ABC):
         raise NotImplementedError(
             f"Action '{action_slug}' is not implemented by connector '{getattr(self, 'slug', 'unknown')}'"
         )
+

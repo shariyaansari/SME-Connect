@@ -1,5 +1,7 @@
 import hashlib
 import json
+import logging
+import os
 from datetime import datetime, timezone
 from typing import Any
 from sqlalchemy import select
@@ -7,6 +9,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.database.models import WorkflowTriggerEvent, WorkflowTriggerState
+
+logger = logging.getLogger(__name__)
 
 
 def _utc_now() -> datetime:
@@ -65,32 +69,109 @@ def extract_event_key(record: dict[str, Any]) -> str:
     return f"hash:{payload_hash}"
 
 
+# ============================================================================
+# Distributed Redis / In-Memory Lock Backend (SETNX Semantics)
+# ============================================================================
+
+class RedisIdempotencyBackend:
+    """
+    Redis-compatible idempotency engine supporting strict SETNX semantics.
+    Falls back gracefully when Redis is not configured or offline.
+    """
+
+    def __init__(self, redis_client: Any = None):
+        self._client = redis_client
+
+    def _get_client(self) -> Any:
+        if self._client is not None:
+            return self._client
+        redis_url = os.environ.get("REDIS_URL")
+        if redis_url:
+            try:
+                import redis
+                self._client = redis.Redis.from_url(redis_url)
+                return self._client
+            except Exception as e:
+                logger.warning(f"Could not initialize Redis client from REDIS_URL: {e}")
+        return None
+
+    def acquire(self, lock_key: str, ttl_seconds: int = 3600) -> bool:
+        client = self._get_client()
+        if client is None:
+            return True  # Proceed to DB-backed atomic lock
+        try:
+            # SET lock_key "1" NX EX ttl_seconds -> returns True only if newly set
+            acquired = client.set(f"sme_connect:idem:{lock_key}", "locked", nx=True, ex=ttl_seconds)
+            return bool(acquired)
+        except Exception as e:
+            logger.warning(f"Redis SETNX lock check failed; falling back to DB lock: {e}")
+            return True
+
+    def release(self, lock_key: str) -> None:
+        client = self._get_client()
+        if client is not None:
+            try:
+                client.delete(f"sme_connect:idem:{lock_key}")
+            except Exception:
+                pass
+
+
+# Global pluggable Redis backend instance
+_redis_backend = RedisIdempotencyBackend()
+
+
+def set_custom_idempotency_backend(backend: RedisIdempotencyBackend | None) -> None:
+    """Allows injecting custom or mock Redis backend for testing."""
+    global _redis_backend
+    _redis_backend = backend or RedisIdempotencyBackend()
+
+
+# ============================================================================
+# Atomic Database-Backed Acquisition Engine (SELECT FOR UPDATE / SAVEPOINT)
+# ============================================================================
+
 def check_and_record_event(
     db: Session,
     workflow_id: int,
     organization_id: int,
     event_key: str,
     execution_id: int | None = None,
+    ttl_seconds: int = 3600,
 ) -> bool:
     """
-    Checks if an event key has already been processed for this workflow.
-    If new, atomically records it into WorkflowTriggerEvent.
+    Strict atomic acquisition of an event idempotency token.
     
+    Guarantees:
+      1. Evaluates Redis SETNX lock if Redis is configured.
+      2. Fast existence check with SELECT FOR UPDATE (where supported) to prevent concurrent races.
+      3. Atomic insert inside a nested transaction (SAVEPOINT). If a concurrent worker races
+         and commits the identical (workflow_id, event_key), IntegrityError rolls back ONLY
+         the savepoint, leaving the outer database session clean and uncorrupted.
+      4. Never exposes or relies on volatile in-memory process dictionaries.
+      
     Returns:
-      True: if the event is new (recorded successfully, workflow can proceed)
-      False: if the event has already been processed (duplicate, must skip)
+      True: if the event token was atomically acquired (new event, workflow execution can proceed)
+      False: if the event has already been recorded or locked by a concurrent worker (duplicate, skip)
     """
-    # 1. Fast existence check
-    existing = db.scalar(
-        select(WorkflowTriggerEvent.id).where(
-            WorkflowTriggerEvent.workflow_id == workflow_id,
-            WorkflowTriggerEvent.event_key == event_key,
-        )
+    lock_key = f"{organization_id}:{workflow_id}:{event_key}"
+
+    # 1. First line of defense: Redis SETNX atomic check (if active)
+    if _redis_backend and not _redis_backend.acquire(lock_key, ttl_seconds=ttl_seconds):
+        return False
+
+    # 2. Fast existence check with row-level locking if supported by dialect
+    query = select(WorkflowTriggerEvent.id).where(
+        WorkflowTriggerEvent.workflow_id == workflow_id,
+        WorkflowTriggerEvent.event_key == event_key,
     )
+    if db.bind and db.bind.dialect.name == "postgresql":
+        query = query.with_for_update()
+
+    existing = db.scalar(query)
     if existing:
         return False
 
-    # 2. Atomic insert with race condition protection
+    # 3. Atomic insertion using nested transaction (SAVEPOINT)
     now = _utc_now()
     event_record = WorkflowTriggerEvent(
         workflow_id=workflow_id,
@@ -99,12 +180,17 @@ def check_and_record_event(
         execution_id=execution_id,
         created_at=now,
     )
-    db.add(event_record)
+
     try:
+        with db.begin_nested():
+            db.add(event_record)
+            db.flush()
         db.commit()
         return True
-    except IntegrityError:
-        db.rollback()
+    except Exception:
+        # Savepoint rolled back automatically. The outer session is completely unpoisoned.
+        if _redis_backend:
+            _redis_backend.release(lock_key)
         return False
 
 
@@ -115,22 +201,26 @@ def link_event_execution(
     execution_id: int,
 ) -> None:
     """
-    Links the created execution ID to the recorded trigger event and updates
-    WorkflowTriggerState.last_processed_event_key.
+    Atomically links the created execution ID to the recorded trigger event and updates
+    WorkflowTriggerState.last_processed_event_key with row-level locking where supported.
     """
-    event_record = db.scalar(
-        select(WorkflowTriggerEvent).where(
-            WorkflowTriggerEvent.workflow_id == workflow_id,
-            WorkflowTriggerEvent.event_key == event_key,
-        )
+    event_query = select(WorkflowTriggerEvent).where(
+        WorkflowTriggerEvent.workflow_id == workflow_id,
+        WorkflowTriggerEvent.event_key == event_key,
     )
+    if db.bind and db.bind.dialect.name == "postgresql":
+        event_query = event_query.with_for_update()
+
+    event_record = db.scalar(event_query)
     if event_record:
         event_record.execution_id = execution_id
 
-    # Also update state last_processed_event_key if trigger state exists
-    state = db.scalar(
-        select(WorkflowTriggerState).where(WorkflowTriggerState.workflow_id == workflow_id)
-    )
+    # Update state last_processed_event_key with row-level locking
+    state_query = select(WorkflowTriggerState).where(WorkflowTriggerState.workflow_id == workflow_id)
+    if db.bind and db.bind.dialect.name == "postgresql":
+        state_query = state_query.with_for_update()
+
+    state = db.scalar(state_query)
     if state:
         state.last_processed_event_key = event_key
 

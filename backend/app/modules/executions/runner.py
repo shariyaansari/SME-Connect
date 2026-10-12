@@ -82,10 +82,11 @@ def poll_workflow_trigger(
             f"No active connection found for trigger connector '{connector_slug}' in this organization"
         )
 
-    # 4. Resolve persistent cursor state
-    trigger_state = db.scalar(
-        select(WorkflowTriggerState).where(WorkflowTriggerState.workflow_id == workflow.id)
-    )
+    # 4. Resolve persistent cursor state with row locking where supported
+    trigger_state_query = select(WorkflowTriggerState).where(WorkflowTriggerState.workflow_id == workflow.id)
+    if db.bind and db.bind.dialect.name == "postgresql":
+        trigger_state_query = trigger_state_query.with_for_update()
+    trigger_state = db.scalar(trigger_state_query)
     current_cursor = trigger_state.cursor if trigger_state else None
 
     # 5. Decrypt credentials in-memory only
@@ -93,7 +94,7 @@ def poll_workflow_trigger(
     runtime_config = dict(connection.config or {})
     runtime_config.update(trigger_config)
 
-    # 6. Read trigger data via adapter contract
+    # 6. Read trigger data via adapter contract with safe exception recovery
     try:
         records, new_cursor = adapter.read_trigger_data(
             trigger_slug=trigger_slug,
@@ -101,6 +102,49 @@ def poll_workflow_trigger(
             credentials=creds,
             cursor=current_cursor,
         )
+    except Exception as exc:
+        clean_err = sanitize_error_message(str(exc))
+        from app.modules.executions.retry_policy import classify_failure
+        cat, _ = classify_failure(exc)
+        fail_time = _utc_now()
+
+        try:
+            with db.begin_nested():
+                failed_exec = WorkflowExecution(
+                    workflow_id=workflow.id,
+                    workflow_version_id=published_version.id,
+                    organization_id=workflow.organization_id,
+                    status="failed",
+                    failure_category=cat.value,
+                    error_message=f"Trigger poll failed: {clean_err}",
+                    started_at=fail_time,
+                    completed_at=fail_time,
+                    last_error_at=fail_time,
+                    created_at=fail_time,
+                )
+                db.add(failed_exec)
+                if trigger_state:
+                    trigger_state.last_polled_at = fail_time
+                    trigger_state.updated_at = fail_time
+            db.commit()
+            db.refresh(failed_exec)
+            try:
+                from app.modules.audit.service import create_audit_log
+                create_audit_log(
+                    db=db,
+                    organization_id=workflow.organization_id,
+                    user_id=workflow.created_by,
+                    action="WORKFLOW_EXECUTION_FAILED",
+                    resource_type="workflow_execution",
+                    resource_id=failed_exec.id,
+                    details=f"Trigger poll failed: {clean_err[:150]}",
+                )
+            except Exception:
+                pass
+            return [failed_exec]
+        except Exception:
+            db.rollback()
+            raise
     finally:
         del creds  # Sensitive credentials promptly removed from scope
 

@@ -27,6 +27,7 @@ from app.modules.workflows.health import (
     calculate_workflow_health,
 )
 from app.modules.workflows.validation import WorkflowValidationError
+from app.modules.billing.service import BillingLimitExceededError
 
 router = APIRouter(
     prefix="/workflows",
@@ -252,6 +253,8 @@ def publish_workflow_endpoint(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=[e.model_dump() for e in err.errors],
         )
+    except BillingLimitExceededError as err:
+        raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail=str(err))
     except ValueError as err:
         if "not found" in str(err).lower():
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(err))

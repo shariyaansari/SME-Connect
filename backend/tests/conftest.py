@@ -34,6 +34,9 @@ def db_session():
     db = TestingSessionLocal()
     try:
         yield db
+    except Exception:
+        db.rollback()
+        raise
     finally:
         db.close()
 
@@ -44,6 +47,9 @@ def client():
         db = TestingSessionLocal()
         try:
             yield db
+        except Exception:
+            db.rollback()
+            raise
         finally:
             db.close()
 

@@ -6,7 +6,9 @@ from sqlalchemy.orm import Session
 
 from app.database.models import Workflow, WorkflowExecution, WorkflowTriggerState, WorkflowVersion
 from app.modules.executions.idempotency import check_and_record_event, link_event_execution
+from app.modules.executions.resolver import sanitize_error_message
 from app.modules.executions.service import execute_workflow
+
 
 
 def _utc_now() -> datetime:
@@ -117,83 +119,123 @@ def run_scheduled_workflow_cycle(
     executed_list: list[WorkflowExecution] = []
 
     for wf in workflows:
-        # Resolve published version
-        published_version = db.scalar(
-            select(WorkflowVersion)
-            .where(
-                WorkflowVersion.workflow_id == wf.id,
-                WorkflowVersion.published_at.is_not(None),
+        published_version = None
+        try:
+            # Resolve published version
+            published_version = db.scalar(
+                select(WorkflowVersion)
+                .where(
+                    WorkflowVersion.workflow_id == wf.id,
+                    WorkflowVersion.published_at.is_not(None),
+                )
+                .order_by(WorkflowVersion.version_number.desc())
             )
-            .order_by(WorkflowVersion.version_number.desc())
-        )
-        if not published_version:
-            continue
+            if not published_version:
+                continue
 
-        definition = published_version.definition or {}
-        trigger = definition.get("trigger", {})
+            definition = published_version.definition or {}
+            trigger = definition.get("trigger", {})
 
-        is_schedule = (trigger.get("type") == "schedule") or (trigger.get("connector") == "schedule")
-        if not is_schedule:
-            continue
+            is_schedule = (trigger.get("type") == "schedule") or (trigger.get("connector") == "schedule")
+            if not is_schedule:
+                continue
 
-        config = trigger.get("config", {})
-        period_key, is_due = compute_schedule_due_state(config, now)
+            config = trigger.get("config", {})
+            period_key, is_due = compute_schedule_due_state(config, now)
 
-        if not is_due:
-            continue
+            if not is_due:
+                continue
 
-        # Prevent duplicate execution for this schedule period
-        is_new_period = check_and_record_event(
-            db=db,
-            workflow_id=wf.id,
-            organization_id=wf.organization_id,
-            event_key=period_key,
-        )
-        if not is_new_period:
-            # Already executed for this hour/day/week period
-            continue
-
-        # Trigger execution using existing execution engine
-        trigger_payload = {
-            "schedule": config,
-            "period_key": period_key,
-            "triggered_at": now.isoformat(),
-        }
-
-        exec_record = execute_workflow(
-            db=db,
-            workflow_id=wf.id,
-            trigger_data=trigger_payload,
-            organization_id=wf.organization_id,
-        )
-
-        link_event_execution(
-            db=db,
-            workflow_id=wf.id,
-            event_key=period_key,
-            execution_id=exec_record.id,
-        )
-
-        # Update or create WorkflowTriggerState checkpoint
-        trigger_state = db.scalar(
-            select(WorkflowTriggerState).where(WorkflowTriggerState.workflow_id == wf.id)
-        )
-        if not trigger_state:
-            trigger_state = WorkflowTriggerState(
+            # Prevent duplicate execution for this schedule period
+            is_new_period = check_and_record_event(
+                db=db,
                 workflow_id=wf.id,
-                workflow_version_id=published_version.id,
-                last_processed_event_key=period_key,
-                last_polled_at=now,
-                created_at=now,
-                updated_at=now,
+                organization_id=wf.organization_id,
+                event_key=period_key,
             )
-            db.add(trigger_state)
-        else:
-            trigger_state.last_processed_event_key = period_key
-            trigger_state.last_polled_at = now
-            trigger_state.updated_at = now
-        db.commit()
+            if not is_new_period:
+                # Already executed for this hour/day/week period
+                continue
 
-        executed_list.append(exec_record)
+            # Trigger execution using existing execution engine
+            trigger_payload = {
+                "schedule": config,
+                "period_key": period_key,
+                "triggered_at": now.isoformat(),
+            }
+
+            exec_record = execute_workflow(
+                db=db,
+                workflow_id=wf.id,
+                trigger_data=trigger_payload,
+                organization_id=wf.organization_id,
+            )
+
+            link_event_execution(
+                db=db,
+                workflow_id=wf.id,
+                event_key=period_key,
+                execution_id=exec_record.id,
+            )
+
+            # Update or create WorkflowTriggerState checkpoint with row locking where supported
+            state_query = select(WorkflowTriggerState).where(WorkflowTriggerState.workflow_id == wf.id)
+            if db.bind and db.bind.dialect.name == "postgresql":
+                state_query = state_query.with_for_update()
+            trigger_state = db.scalar(state_query)
+            if not trigger_state:
+                trigger_state = WorkflowTriggerState(
+                    workflow_id=wf.id,
+                    workflow_version_id=published_version.id,
+                    last_processed_event_key=period_key,
+                    last_polled_at=now,
+                    created_at=now,
+                    updated_at=now,
+                )
+                db.add(trigger_state)
+            else:
+                trigger_state.last_processed_event_key = period_key
+                trigger_state.last_polled_at = now
+                trigger_state.updated_at = now
+            db.commit()
+
+            executed_list.append(exec_record)
+
+        except Exception as exc:
+            clean_err = sanitize_error_message(str(exc))
+            fail_time = _utc_now()
+            try:
+                with db.begin_nested():
+                    failed_exec = WorkflowExecution(
+                        workflow_id=wf.id,
+                        workflow_version_id=published_version.id if published_version else None,
+                        organization_id=wf.organization_id,
+                        status="failed",
+                        failure_category="scheduler_error",
+                        error_message=f"Scheduled workflow error: {clean_err}",
+                        started_at=fail_time,
+                        completed_at=fail_time,
+                        last_error_at=fail_time,
+                        created_at=fail_time,
+                    )
+                    db.add(failed_exec)
+                db.commit()
+                db.refresh(failed_exec)
+                executed_list.append(failed_exec)
+                try:
+                    from app.modules.audit.service import create_audit_log
+                    create_audit_log(
+                        db=db,
+                        organization_id=wf.organization_id,
+                        user_id=wf.created_by,
+                        action="WORKFLOW_EXECUTION_FAILED",
+                        resource_type="workflow_execution",
+                        resource_id=failed_exec.id,
+                        details=f"Scheduler error: {clean_err[:150]}",
+                    )
+                except Exception:
+                    pass
+            except Exception:
+                db.rollback()
 
     return executed_list

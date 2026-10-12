@@ -39,6 +39,7 @@ async function request(endpoint, options = {}) {
     if (Array.isArray(data.detail)) {
       err.validationErrors = data.detail;
     }
+    err.status = response.status;
     throw err;
   }
 
@@ -165,6 +166,13 @@ export const api = {
     method: 'POST',
   }),
 
+  // Data Mapping & Transformations (Module 8)
+  fetchTransformCatalog: () => request('/workflows/transforms/catalog'),
+  previewMapping: (payload) => request('/workflows/mapping/preview', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }),
+
   // Templates (Module 3A)
   fetchTemplates: () => request('/templates/'),
   fetchTemplate: (id) => request(`/templates/${id}`),
@@ -213,4 +221,70 @@ export const api = {
   fetchWorkflowHealth: (id, orgId) => request(
     orgId ? `/workflows/${id}/health?organization_id=${orgId}` : `/workflows/${id}/health`
   ),
+
+  // Monitoring Dashboard & Usage (Module 7)
+  fetchDashboardOverview: (periodDays = 30, orgId) => {
+    const params = new URLSearchParams();
+    if (periodDays) params.append('period_days', periodDays);
+    if (orgId) params.append('organization_id', orgId);
+    return request(`/monitoring/dashboard?${params.toString()}`);
+  },
+  fetchUsageStats: (year, month, orgId) => {
+    const params = new URLSearchParams();
+    if (year) params.append('year', year);
+    if (month) params.append('month', month);
+    if (orgId) params.append('organization_id', orgId);
+    const qs = params.toString();
+    return request(qs ? `/monitoring/usage?${qs}` : '/monitoring/usage');
+  },
+  fetchWorkflowMonitoring: (periodDays = 30, orgId) => {
+    const params = new URLSearchParams();
+    if (periodDays) params.append('period_days', periodDays);
+    if (orgId) params.append('organization_id', orgId);
+    return request(`/monitoring/workflows?${params.toString()}`);
+  },
+
+  // Notifications (Module 7)
+  fetchNotifications: (isRead = null, limit = 50, orgId) => {
+    const params = new URLSearchParams();
+    if (isRead !== null && isRead !== undefined) params.append('is_read', isRead);
+    if (limit) params.append('limit', limit);
+    if (orgId) params.append('organization_id', orgId);
+    const qs = params.toString();
+    return request(qs ? `/notifications?${qs}` : '/notifications');
+  },
+  fetchUnreadNotificationCount: (orgId) => request(
+    orgId ? `/notifications/unread-count?organization_id=${orgId}` : '/notifications/unread-count'
+  ),
+  markNotificationRead: (id, orgId) => request(
+    orgId ? `/notifications/${id}/read?organization_id=${orgId}` : `/notifications/${id}/read`,
+    { method: 'PATCH' }
+  ),
+  markAllNotificationsRead: (orgId) => request(
+    orgId ? `/notifications/mark-all-read?organization_id=${orgId}` : '/notifications/mark-all-read',
+    { method: 'POST' }
+  ),
+  deleteNotification: (id, orgId) => request(
+    orgId ? `/notifications/${id}?organization_id=${orgId}` : `/notifications/${id}`,
+    { method: 'DELETE' }
+  ),
+
+  // Billing & Subscriptions (Module 9)
+  getPlans: () => request('/billing/plans'),
+  getSubscription: (orgId) => request(
+    orgId ? `/billing/subscription?organization_id=${orgId}` : '/billing/subscription'
+  ),
+  updateSubscription: (data, orgId) => request(
+    orgId ? `/billing/subscription?organization_id=${orgId}` : '/billing/subscription',
+    {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }
+  ),
+  cancelSubscription: (orgId) => request(
+    orgId ? `/billing/cancel?organization_id=${orgId}` : '/billing/cancel',
+    { method: 'POST' }
+  ),
 };
+
+

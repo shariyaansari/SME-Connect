@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
+from fastapi.middleware.cors import CORSMiddleware
 from app.database.connection import Base, engine
 from app.database import models  # noqa: F401
 from app.modules.auth.router import router as auth_router
@@ -9,6 +10,11 @@ from app.modules.connectors.router import router as connectors_router
 from app.modules.workflows.router import router as workflows_router
 from app.modules.templates.router import router as templates_router
 from app.modules.executions.router import router as executions_router
+from app.modules.monitoring.router import router as monitoring_router
+from app.modules.notifications.router import router as notifications_router
+from app.modules.transformations.router import router as transformations_router
+from app.modules.billing.router import router as billing_router
+
 
 
 
@@ -27,12 +33,26 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 app.include_router(auth_router)
 app.include_router(organization_router)
 app.include_router(connectors_router)
 app.include_router(workflows_router)
+app.include_router(transformations_router)
 app.include_router(templates_router)
 app.include_router(executions_router)
+app.include_router(monitoring_router)
+app.include_router(notifications_router)
+app.include_router(billing_router)
+
+
 
 
 

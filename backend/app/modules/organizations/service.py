@@ -283,9 +283,10 @@ def accept_invitation(
     user_id: int,
     token: str,
 ) -> tuple[int, str]:
-    invitation = db.scalar(
-        select(Invitation).where(Invitation.token == token)
-    )
+    query = select(Invitation).where(Invitation.token == token)
+    if db.bind and db.bind.dialect.name == "postgresql":
+        query = query.with_for_update()
+    invitation = db.scalar(query)
 
     if not invitation:
         raise ValueError("Invitation not found")
